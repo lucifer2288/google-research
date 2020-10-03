@@ -30,7 +30,8 @@ source ./venv3/bin/activate
 
 # install TensorFlow, correct TensorFlow version is important
 pip install --upgrade pip
-pip install tf_nightly==2.3.0.dev20200515
+pip install tf_nightly==2.4.0-dev20200917
+pip install tensorflow_addons
 # was tested on tf_nightly-2.3.0.dev20200515-cp36-cp36m-manylinux2010_x86_64.whl
 
 # install libs:
@@ -855,7 +856,7 @@ stream latency[us]: 353
 ```shell
 python -m kws_streaming.data.input_data_test
 python -m kws_streaming.layers.conv2d_test
-python -m kws_streaming.layers.dataframe_test
+python -m kws_streaming.layers.data_frame_test
 python -m kws_streaming.layers.dct_test
 python -m kws_streaming.layers.dense_test
 python -m kws_streaming.layers.depthwiseconv1d_test

@@ -1,0 +1,6 @@
+haiku
+jax
+numpy
+optax
+tensorflow
+tensorflow_datasets

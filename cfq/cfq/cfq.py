@@ -25,8 +25,11 @@ from tensor2tensor.data_generators import problem
 from tensor2tensor.data_generators import text_problems
 from tensor2tensor.data_generators.problem import DatasetSplit
 from tensor2tensor.layers import common_hparams
+from tensor2tensor.models import evolved_transformer
 from tensor2tensor.models.research import universal_transformer
 from tensor2tensor.utils import registry
+
+import tensorflow.compat.v1 as tf
 
 
 @registry.register_problem
@@ -63,7 +66,8 @@ class CFQ(text_problems.Text2TextProblem):
     encode_name = os.path.join(folder_name, '%s_encode.txt' % split_name)
     decode_name = os.path.join(folder_name, '%s_decode.txt' % split_name)
 
-    with open(encode_name) as encode_f, open(decode_name) as decode_f:
+    with tf.gfile.Open(encode_name) as encode_f, tf.gfile.Open(
+        decode_name) as decode_f:
       for x, y in zip(encode_f, decode_f):
         yield {
             'inputs': x.strip(),
@@ -216,4 +220,19 @@ def cfq_universal_transformer():
   hparams.num_hidden_layers = 6
   hparams.num_rec_steps = 4
   hparams.recurrence_type = 'basic'
+  return hparams
+
+
+@registry.register_hparams
+def cfq_evolved_transformer():
+  """Evolved transformer hyperparameters tuned for CFQ."""
+  hparams = evolved_transformer.evolved_transformer_base()
+  hparams.learning_rate_decay_scheme = 'none'
+  hparams.learning_rate_schedule = 'constant*single_cycle_cos_decay'
+  hparams.learning_rate_constant = 0.0011703123695332683
+  hparams.learning_rate_warmup_steps = 4000
+  hparams.batch_size = 4096
+  hparams.hidden_size = 128
+  hparams.num_heads = 8
+  hparams.num_hidden_layers = 2
   return hparams

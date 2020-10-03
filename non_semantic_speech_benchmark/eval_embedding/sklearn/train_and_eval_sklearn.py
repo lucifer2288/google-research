@@ -16,18 +16,31 @@
 # Lint as: python3
 """Train and eval a sklearn model."""
 
+import os
+import pickle
 import time
+from typing import Tuple, Any
 from absl import logging
 
 import numpy as np
 
+from non_semantic_speech_benchmark import file_utils
+from non_semantic_speech_benchmark.eval_embedding import metrics
 from non_semantic_speech_benchmark.eval_embedding.sklearn import models
 from non_semantic_speech_benchmark.eval_embedding.sklearn import sklearn_utils
 
 
-def train_and_get_score(embedding_name, label_name, label_list, train_glob,
-                        eval_glob, test_glob, model_name, l2_normalization,
-                        speaker_id_name=None):
+def train_and_get_score(embedding_name,
+                        label_name,
+                        label_list,
+                        train_glob,
+                        eval_glob,
+                        test_glob,
+                        model_name,
+                        l2_normalization,
+                        speaker_id_name=None,
+                        save_model_dir=None,
+                        eval_metric='accuracy'):
   """Train and eval sklearn models on data.
 
   Args:
@@ -40,9 +53,11 @@ def train_and_get_score(embedding_name, label_name, label_list, train_glob,
     model_name: Name of model.
     l2_normalization: Python bool. If `True`, normalize embeddings by L2 norm.
     speaker_id_name: `None`, or name of speaker ID field.
+    save_model_dir: If not `None`, write sklearn models to this directory.
+    eval_metric: String name of the desired evaluation metric.
 
   Returns:
-    A Python float, of the accuracy on the eval set.
+    A tuple of Python floats, (eval metric, test metric).
   """
   def _cur_s(s):
     return time.time() - s
@@ -88,12 +103,42 @@ def train_and_get_score(embedding_name, label_name, label_list, train_glob,
   d.fit(npx_train, npy_train)
   logging.info('Trained model: %.2f min', _cur_m(s))
 
-  # Eval.
-  eval_score = d.score(npx_eval, npy_eval)
+  eval_score, test_score = _calc_eval_scores(eval_metric, d, npx_eval, npy_eval,
+                                             npx_test, npy_test)
   logging.info('%s: %.3f', model_name, eval_score)
-
-  # Test.
-  test_score = d.score(npx_test, npy_test)
   logging.info('%s: %.3f', model_name, test_score)
 
+  # If `save_model_dir` is present, write model to this directory.
+  # To load the model after saving, use:
+  # ```python
+  # with file_utils.Open(model_filename, 'rb') as f:
+  #   m = pickle.load(f)
+  # ```
+  if save_model_dir:
+    file_utils.MaybeMakeDirs(save_model_dir)
+    model_filename = os.path.join(save_model_dir, f'{model_name}.pickle')
+    with file_utils.Open(model_filename, 'wb') as f:
+      pickle.dump(d, f)
+
   return (eval_score, test_score)
+
+
+def _calc_eval_scores(eval_metric, d, npx_eval,
+                      npy_eval, npx_test,
+                      npy_test):
+  """Compute desired metric on eval and test."""
+  if eval_metric == 'equal_error_rate':
+    # Eval.
+    regression_output = d.predict_proba(npx_eval)[:, 1]  # Prob of class 1.
+    eval_score = metrics.calculate_eer(npy_eval, regression_output)
+    # Test.
+    regression_output = d.predict_proba(npx_test)[:, 1]  # Prob of class 1.
+    test_score = metrics.calculate_eer(npy_test, regression_output)
+  elif eval_metric == 'accuracy':
+    # Eval.
+    eval_score = d.score(npx_eval, npy_eval)
+    # Test.
+    test_score = d.score(npx_test, npy_test)
+  else:
+    raise ValueError(f'`eval_metric` not recognized: {eval_metric}')
+  return eval_score, test_score

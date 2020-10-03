@@ -22,18 +22,18 @@ from absl.testing import flagsaver
 from absl.testing import parameterized
 import mock
 import tensorflow.compat.v2 as tf
-tf.compat.v2.enable_v2_behavior()
-assert tf.executing_eagerly()
 
-from non_semantic_speech_benchmark.eval_embedding.keras import train_keras  # pylint: disable=g-import-not-at-top
+from non_semantic_speech_benchmark.eval_embedding.keras import models
+from non_semantic_speech_benchmark.eval_embedding.keras import train_keras
 
 
 def _get_data(*args, **kwargs):
   del args
   assert 'embedding_dim' in kwargs
-  assert 'batch_size' in kwargs
+  assert 'bucket_boundaries' in kwargs
+  assert 'bucket_batch_sizes' in kwargs
   assert 'label_list' in kwargs
-  bs = kwargs['batch_size']
+  bs = kwargs['bucket_batch_sizes'][0]
   emb = tf.zeros((bs, 10, kwargs['embedding_dim']), tf.float32)
   labels = tf.zeros([bs], tf.int32)
   labels_onehot = tf.one_hot(labels, len(kwargs['label_list']))
@@ -43,15 +43,18 @@ def _get_data(*args, **kwargs):
 class TrainKerasTest(parameterized.TestCase):
 
   @parameterized.parameters(
-      {'num_clusters': 0},
-      {'num_clusters': 4},
+      {'num_clusters': 0, 'alpha_init': None},
+      {'num_clusters': 4, 'alpha_init': None},
+      {'num_clusters': None, 'alpha_init': 1.0},
   )
-  def test_get_model(self, num_clusters):
+  def test_get_model(self, num_clusters, alpha_init):
     num_classes = 4
     emb = tf.zeros([3, 5, 8])
     y_onehot = tf.one_hot([0, 1, 2], num_classes)
 
-    model = train_keras.get_model(num_classes, ubn=True, nc=num_clusters)
+    model = models.get_keras_model(
+        num_classes, use_batchnorm=True, num_clusters=num_clusters,
+        alpha_init=alpha_init)
 
     loss_obj = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
     opt = tf.keras.optimizers.Adam()
@@ -77,10 +80,13 @@ class TrainKerasTest(parameterized.TestCase):
     flags.FLAGS.nc = 2
     flags.FLAGS.label_name = 'emotion'
     flags.FLAGS.label_list = ['no', 'yes']
+    flags.FLAGS.bucket_boundaries = [10, 20]
     flags.FLAGS.logdir = absltest.get_default_test_tmpdir()
 
     train_keras.train_and_report(debug=True)
 
 
 if __name__ == '__main__':
+  tf.compat.v2.enable_v2_behavior()
+  assert tf.executing_eagerly()
   absltest.main()

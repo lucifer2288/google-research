@@ -22,6 +22,7 @@ and implemented most popular KWS models:
 * [ds_cnn](https://arxiv.org/pdf/1711.07128.pdf) - depth wise convolutional neural network;
 * [svdf](https://arxiv.org/pdf/1812.02802.pdf) - singular value decomposition filter neural network (sequence of 1d depthwise conv and 1x1 conv);
 * svdf_resnet - [svdf](https://arxiv.org/pdf/1812.02802.pdf) neural network with residual connections;
+* [ds_tc_resnet] - combination of 1d depthwise convolution in time with residual blocks, based on [MatchboxNet](https://arxiv.org/abs/2004.08531)
 * [att_rnn](https://arxiv.org/pdf/1808.08929.pdf) - combination of attention with RNN(bi directional LSTM);
 * att_mh_rnn - extended version of [att_rnn](https://arxiv.org/pdf/1808.08929.pdf) with multihead attention;
 * [mobilenet](https://arxiv.org/abs/1704.04861) - reduced version of mobilenet vision/imagenet model, but with 1d temporal conv;
@@ -118,10 +119,9 @@ output = Stream(cell=tf.keras.layers.Flatten(...))(output)
 output = tf.keras.layers.Dense(...)(output)
 ```
 
-### Current limitation:
-Some models are not supported in streaming mode:
-* Bidirectional RNN kind of models such as att_rnn, att_mh_rnn require access to the whole sequence.
-* Pooling and striding in time dimension is not supported in streaming mode. So models such as mobilenet, mobilenet_v2, xception, inception, inception_resnet, tc_resnet are not streamable in this library now. It is only a design decision and can be enabled in the future.
+### Limitation:
+* Models which require access to the whole input sequence are not streamable, such as bidirectional RNN or attention computed over the whole sequence.
+* Any causal models including models with pooling and striding in time dimension can be supported in streaming mode: for example [test_stream_strided_convolution](https://github.com/google-research/google-research/blob/master/kws_streaming/layers/stream_test.py). For causal models we set padding='causal'. If the model is not causal, then the delay layer has to be inserted manually, as it is shown in [residual_model](https://github.com/google-research/google-research/blob/master/kws_streaming/layers/delay_test.py).
 
 ## Inference
 KWS model in streaming mode is executed by steps:

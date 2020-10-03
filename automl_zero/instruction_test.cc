@@ -18,7 +18,6 @@
 #include <cstdint>
 #include <random>
 #include <type_traits>
-#include <unordered_set>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -35,7 +34,6 @@ using ::std::find;  // NOLINT
 using ::std::function;  // NOLINT
 using ::std::mt19937;  // NOLINT
 using ::std::round;  // NOLINT
-using ::std::unordered_set;  // NOLINT
 using ::std::vector;  // NOLINT
 using ::testing::Test;
 
@@ -89,8 +87,8 @@ Instruction AlterParam(
   return modified_instruction;
 }
 
-absl::node_hash_set<DiffId> Differences(const Instruction& instr1,
-                                        const Instruction& instr2) {
+absl::node_hash_set<DiffId> Differences(
+    const Instruction& instr1, const Instruction& instr2) {
   absl::node_hash_set<DiffId> differences;
   if (instr1.op_ != instr2.op_) {
     differences.insert(kDifferentOp);

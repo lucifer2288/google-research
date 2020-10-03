@@ -15,7 +15,7 @@
 
 """A layer for extracting features from speech data."""
 import frozendict
-from kws_streaming.layers import dataframe
+from kws_streaming.layers import data_frame
 from kws_streaming.layers import dct
 from kws_streaming.layers import magnitude_rdft_mel
 from kws_streaming.layers import modes
@@ -80,7 +80,7 @@ class SpeechFeatures(tf.keras.layers.Layer):
   def build(self, input_shape):
     super(SpeechFeatures, self).build(input_shape)
 
-    self.data_frame = dataframe.DataFrame(
+    self.data_frame = data_frame.DataFrame(
         mode=self.mode,
         inference_batch_size=self.inference_batch_size,
         frame_size=self.frame_size,
@@ -156,6 +156,13 @@ class SpeechFeatures(tf.keras.layers.Layer):
     return outputs
 
   def _mfcc_op(self, inputs):
+
+    if self.params['dct_num_features'] <= 0:
+      raise ValueError('dct_num_features for mfcc_op has to be > 0')
+
+    if self.params['mel_num_bins'] <= 0:
+      raise ValueError('mel_num_bins for mfcc_op has to be > 0')
+
     # MFCC implementation based on TF custom op (supported by TFLite)
     # It reduces model size in comparison to _mfcc_tf
     if (self.mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE or

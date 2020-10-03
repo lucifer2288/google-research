@@ -19,10 +19,12 @@ import functools
 from . import metrics
 from . import postprocessors
 from . import preprocessors
-
 import t5.data
 from t5.data import postprocessors as t5_postprocessors
 from t5.data import preprocessors as t5_preprocessors
+from t5.data.glue_utils import get_glue_postprocess_fn
+from t5.data.utils import Feature
+from t5.data.utils import get_default_vocabulary
 from t5.evaluation import metrics as t5_metrics
 import tensorflow_datasets as tfds
 
@@ -30,7 +32,10 @@ import tensorflow_datasets as tfds
 TaskRegistry = t5.data.TaskRegistry
 TfdsTask = t5.data.TfdsTask
 
-DEFAULT_SPM_PATH = "gs://t5-data/vocabs/cc_all.32000/sentencepiece.model"  # GCS
+DEFAULT_OUTPUT_FEATURES = {
+    "inputs": Feature(vocabulary=get_default_vocabulary, add_eos=True),
+    "targets": Feature(vocabulary=get_default_vocabulary, add_eos=True)
+}
 
 # ======================== CoS-E Corpus Task ==================================
 TaskRegistry.add(
@@ -39,7 +44,7 @@ TaskRegistry.add(
     tfds_name="cos_e:0.0.1",
     text_preprocessor=preprocessors.cos_e,
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.esnli_metric])
 
 # CoS-E with no explanations, and modified prefixes like e-SNLI.
@@ -51,7 +56,7 @@ TaskRegistry.add(
         preprocessors.cos_e, prefix="nli", question_prefix="premise:",
         drop_explanations=True),
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.esnli_metric])
 
 n_cos_e_explanations = [5000, 2000, 1000, 500, 200, 100]
@@ -63,7 +68,7 @@ for n in n_cos_e_explanations:
       splits={"train": "train[0:{}]".format(n)},
       text_preprocessor=[preprocessors.cos_e],
       postprocess_fn=postprocessors.abstractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
   # Skip n in train.
   TaskRegistry.add(
@@ -74,7 +79,7 @@ for n in n_cos_e_explanations:
       text_preprocessor=functools.partial(
           preprocessors.cos_e, prefix="cos_e", drop_explanations=True),
       postprocess_fn=postprocessors.abstractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
 
 # Note: cos_e has a validation set (we use the dev set for validation), but no
@@ -85,7 +90,7 @@ TaskRegistry.add(
     tfds_name="cos_e:0.0.1",
     text_preprocessor=preprocessors.cos_e,
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     splits=["validation"],
     metric_fns=[metrics.esnli_metric])
 
@@ -101,60 +106,60 @@ TaskRegistry.add(
     text_preprocessor=functools.partial(
         preprocessors.cos_e, prefix="explain nli", question_prefix="premise:"),
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     splits=["validation"],
     metric_fns=[metrics.esnli_metric])
 
 TaskRegistry.add(
-    "esnli_v002_with_choices",
+    "esnli_v010_with_choices",
     TfdsTask,
-    tfds_name="esnli/plain_text:0.0.2",
+    tfds_name="esnli:0.1.0",
     text_preprocessor=functools.partial(preprocessors.esnli,
                                         add_choices=True),
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.esnli_metric])
 
 # e-SNLI with no explanations.
 TaskRegistry.add(
-    "esnli_v002_0_expln_with_choices",
+    "esnli_v010_0_expln_with_choices",
     TfdsTask,
-    tfds_name="esnli/plain_text:0.0.2",
+    tfds_name="esnli:0.1.0",
     text_preprocessor=functools.partial(
         preprocessors.esnli, prefix="nli", drop_explanations=True,
         add_choices=True),
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.esnli_metric])
 
 # ======================== e-SNLI Corpus Task ==================================
 TaskRegistry.add(
-    "esnli_v002",
+    "esnli_v010",
     TfdsTask,
-    tfds_name="esnli/plain_text:0.0.2",
+    tfds_name="esnli:0.1.0",
     text_preprocessor=preprocessors.esnli,
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.esnli_metric])
 
 # e-SNLI with no explanations.
 TaskRegistry.add(
-    "esnli_v002_0_expln",
+    "esnli_v010_0_expln",
     TfdsTask,
-    tfds_name="esnli/plain_text:0.0.2",
+    tfds_name="esnli:0.1.0",
     text_preprocessor=functools.partial(
         preprocessors.esnli, prefix="nli", drop_explanations=True),
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.esnli_metric])
 
 TaskRegistry.add(
-    "esnli_eval_v002",
+    "esnli_eval_v010",
     TfdsTask,
-    tfds_name="esnli/plain_text:0.0.2",
+    tfds_name="esnli:0.1.0",
     text_preprocessor=preprocessors.esnli,
     postprocess_fn=postprocessors.abstractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     splits=["validation", "test"],
     metric_fns=[metrics.esnli_metric])
 
@@ -162,24 +167,24 @@ n_esnli_explanations = [50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100]
 for n in n_esnli_explanations:
   # Take n in train.
   TaskRegistry.add(
-      "esnli_explanations_take{}_v002".format(n),
+      "esnli_explanations_take{}_v010".format(n),
       t5.data.TfdsTask,
-      tfds_name="esnli/plain_text:0.0.2",
+      tfds_name="esnli:0.1.0",
       splits={"train": "train[0:{}]".format(n)},
       text_preprocessor=[preprocessors.esnli],
       postprocess_fn=postprocessors.abstractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
   # Skip n in train.
   TaskRegistry.add(
-      "esnli_labels_skip{}_v002".format(n),
+      "esnli_labels_skip{}_v010".format(n),
       t5.data.TfdsTask,
-      tfds_name="esnli/plain_text:0.0.2",
+      tfds_name="esnli:0.1.0",
       splits={"train": "train[{}:]".format(n)},
       text_preprocessor=functools.partial(
           preprocessors.esnli, prefix="nli", drop_explanations=True),
       postprocess_fn=postprocessors.abstractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
 
 mnli_config = tfds.text.glue.Glue.builder_configs["mnli"]
@@ -192,9 +197,9 @@ TaskRegistry.add(
         t5_preprocessors.glue,
         benchmark_name="nli",
         label_names=mnli_config.label_classes),
-    metric_fns=t5.data.tasks.GLUE_METRICS["mnli"],
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
-    postprocess_fn=t5.data.tasks._get_glue_postprocess_fn(mnli_config),
+    metric_fns=t5.data.glue_utils.GLUE_METRICS["mnli"],
+    output_features=DEFAULT_OUTPUT_FEATURES,
+    postprocess_fn=get_glue_postprocess_fn(mnli_config),
 )
 for mnli_eval_set in ("matched", "mismatched"):
   TaskRegistry.add(
@@ -206,7 +211,7 @@ for mnli_eval_set in ("matched", "mismatched"):
           benchmark_name="explain nli",
           label_names=mnli_config.label_classes),
       metric_fns=[metrics.esnli_metric],
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       postprocess_fn=postprocessors.abstractive_explanations,
   )
 # pylint: enable=protected-access
@@ -218,7 +223,7 @@ TaskRegistry.add(
     tfds_name="movie_rationales:0.1.0",
     text_preprocessor=preprocessors.extractive_explanations,
     postprocess_fn=postprocessors.extractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.extractive_explanations_metric])
 
 TaskRegistry.add(
@@ -230,7 +235,7 @@ TaskRegistry.add(
         drop_explanations=True,
         prefix="sentiment"),
     postprocess_fn=postprocessors.extractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[])
 
 n_movie_explanations = [1000, 500, 200, 100]
@@ -243,7 +248,7 @@ for n in n_movie_explanations:
       splits={"train": "train[0:{}]".format(n)},
       text_preprocessor=preprocessors.extractive_explanations,
       postprocess_fn=postprocessors.extractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
   # Skip n in train.
   TaskRegistry.add(
@@ -254,7 +259,7 @@ for n in n_movie_explanations:
       text_preprocessor=functools.partial(
           preprocessors.extractive_explanations, drop_explanations=True),
       postprocess_fn=postprocessors.extractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
 
 TaskRegistry.add(
@@ -263,7 +268,7 @@ TaskRegistry.add(
     tfds_name="movie_rationales:0.1.0",
     text_preprocessor=preprocessors.extractive_explanations,
     postprocess_fn=postprocessors.extractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     splits=["validation", "test"],
     metric_fns=[metrics.extractive_explanations_metric])
 
@@ -271,23 +276,23 @@ TaskRegistry.add(
 TaskRegistry.add(
     "imdb_reviews_v100",
     TfdsTask,
-    tfds_name="imdb_reviews/plain_text:1.0.0",
+    tfds_name="imdb_reviews:1.0.0",
     text_preprocessor=preprocessors.imdb_reviews,
     postprocess_fn=functools.partial(
         t5_postprocessors.string_label_to_class_id,
         label_classes=["negative", "positive"]),
     splits=["train", "test"],
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[t5_metrics.accuracy])
 
 TaskRegistry.add(
     "imdb_reviews_eval_v100",
     TfdsTask,
-    tfds_name="imdb_reviews/plain_text:1.0.0",
+    tfds_name="imdb_reviews:1.0.0",
     text_preprocessor=functools.partial(
         preprocessors.imdb_reviews, prefix="explain sentiment"),
     postprocess_fn=postprocessors.extractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.extractive_explanations_metric],
     splits=["test"],
 )
@@ -306,7 +311,7 @@ for c in amazon_review_categories:
           t5_postprocessors.string_label_to_class_id,
           label_classes=["negative", "positive"]),
       splits={"train": "train[10%:]", "validation": "train[:10%]"},
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[t5_metrics.accuracy])
 
   TaskRegistry.add(
@@ -317,7 +322,7 @@ for c in amazon_review_categories:
           preprocessors.amazon_reviews, prefix="explain sentiment"),
       postprocess_fn=postprocessors.extractive_explanations,
       splits={"validation": "train[:10%]"},
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[metrics.extractive_explanations_metric])
 
 # ======================== Eraser MultiRC ======================
@@ -327,7 +332,7 @@ TaskRegistry.add(
     tfds_name="eraser_multi_rc:0.1.1",
     text_preprocessor=preprocessors.eraser_multi_rc,
     postprocess_fn=postprocessors.extractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     metric_fns=[metrics.extractive_explanations_metric])
 
 n_multi_rc_explanations = [10000, 5000, 2000, 1000, 500, 200, 100]
@@ -340,7 +345,7 @@ for n in n_multi_rc_explanations:
       splits={"train": "train[0:{}]".format(n)},
       text_preprocessor=preprocessors.eraser_multi_rc,
       postprocess_fn=postprocessors.extractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
   # Skip n in train.
   TaskRegistry.add(
@@ -351,7 +356,7 @@ for n in n_multi_rc_explanations:
       text_preprocessor=functools.partial(
           preprocessors.eraser_multi_rc, drop_explanations=True),
       postprocess_fn=postprocessors.extractive_explanations,
-      sentencepiece_model_path=DEFAULT_SPM_PATH,
+      output_features=DEFAULT_OUTPUT_FEATURES,
       metric_fns=[])
 
 TaskRegistry.add(
@@ -360,6 +365,6 @@ TaskRegistry.add(
     tfds_name="eraser_multi_rc:0.1.1",
     text_preprocessor=preprocessors.eraser_multi_rc,
     postprocess_fn=postprocessors.extractive_explanations,
-    sentencepiece_model_path=DEFAULT_SPM_PATH,
+    output_features=DEFAULT_OUTPUT_FEATURES,
     splits=["validation", "test"],
     metric_fns=[metrics.extractive_explanations_metric])

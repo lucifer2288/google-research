@@ -13,11 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Lint as: python3
 """Utils for preprocessing the CFQ dataset."""
 
 import collections
-import json
 import os
 import string
 from typing import Any, Dict, List, Tuple
@@ -25,41 +23,13 @@ from typing import Any, Dict, List, Tuple
 from absl import logging
 
 from tensorflow.compat.v1.io import gfile
+import tensorflow_datasets as tfds
 
 Dataset = Dict[str, List[Tuple[str, str]]]
 
 
-def load_json(path):
-  logging.info(f'Reading json from {path} into memory...')
-  with gfile.GFile(path) as f:
-    data = json.load(f)
-  logging.info(f'Successfully loaded json data from {path} into memory.')
-  return data
-
-
-def load_scan(path):
-  """Read original scan task data and convert into CFQ-style json format."""
-  logging.info(f'Reading SCAN tasks from {path}.')
-  def parse(infile):
-    for line in infile.read().split('\n'):
-      if not line.startswith('IN: '):
-        continue
-      commands, actions = line[len('IN: '):].strip().split(' OUT: ', 1)
-      yield {'questionPatternModEntities': commands,
-             'sparqlPatternModEntities': actions}
-  return list(parse(gfile.GFile(path)))
-
-
-def load_dataset(path):
-  """Load dataset from .json or SCAN task format."""
-  if path[-5:] == '.json':
-    return load_json(path)
-  else:
-    return load_scan(path)
-
-
 def tokenize_punctuation(text):
-  text = map(lambda c: f' {c} ' if c in string.punctuation else c, text)
+  text = map(lambda c: ' %s ' % c if c in string.punctuation else c, text)
   return ' '.join(''.join(text).split())
 
 
@@ -89,23 +59,26 @@ def get_encode_decode_pair(sample):
   return (encode_text, decode_text)
 
 
-def get_dataset(samples, split):
-  """Creates a dataset by taking @split from @samples."""
-  logging.info('Retrieving splits...')
-  split_names = ['train', 'dev', 'test']
-  idx_names = [f'{s}Idxs' for s in split_names]
+def get_dataset_from_tfds(dataset, split):
+  """Load dataset from TFDS and do some basic preprocessing."""
+  logging.info('Loading dataset via TFDS.')
+  allsplits = tfds.load(dataset + '/' + split, as_supervised=True)
+  split_names = {'train': 'train', 'dev': 'validation', 'test': 'test'}
+  if dataset == 'scan':
+    # scan has 'train' and 'test' sets only. We simply output the test set as
+    # both dev and test. We only really use the dev set but t2t-datagen expects
+    # all three.
+    split_names = {'train': 'train', 'dev': 'test', 'test': 'test'}
+
   dataset = collections.defaultdict(list)
-  if not set(idx_names) <= split.keys():
-    logging.fatal(f'Invalid split: JSON should contain fields {idx_names}.')
-    return dataset
-  for split_name, idx_name in zip(split_names, idx_names):
-    logging.info(
-        f'  Retrieving {split_name} ({len(split[idx_name])} instances)')
-    for idx in split[idx_name]:
-      dataset[split_name].append(get_encode_decode_pair(samples[idx]))
+  for cfq_split_name, tfds_split_name in split_names.items():
+    for raw_x, raw_y in tfds.as_numpy(allsplits[tfds_split_name]):
+      encode_decode_pair = (tokenize_punctuation(raw_x.decode()),
+                            preprocess_sparql(raw_y.decode()))
+      dataset[cfq_split_name].append(encode_decode_pair)
 
   size_str = ', '.join(f'{s}={len(dataset[s])}' for s in split_names)
-  logging.info(f'Finished retrieving splits. Size: {size_str}')
+  logging.info('Finished loading splits. Size: %s', size_str)
   return dataset
 
 
@@ -114,20 +87,20 @@ def write_dataset(dataset, save_path):
   if not dataset:
     logging.info('No dataset to write.')
     return
-  logging.info(f'Writing dataset to {save_path}')
+  logging.info('Writing dataset to %s', save_path)
   for split_name, list_of_input_output_pairs in dataset.items():
     folder_name = os.path.join(save_path, split_name)
     if not os.path.exists(folder_name):
       os.makedirs(folder_name)
-    encode_name = os.path.join(folder_name, f'{split_name}_encode.txt')
-    decode_name = os.path.join(folder_name, f'{split_name}_decode.txt')
+    encode_name = os.path.join(folder_name, '%s_encode.txt' % split_name)
+    decode_name = os.path.join(folder_name, '%s_decode.txt' % split_name)
     with gfile.GFile(encode_name,
                      'w') as encode_f, gfile.GFile(decode_name,
                                                    'w') as decode_f:
       for pair in list_of_input_output_pairs:
         encode_f.write(pair[0] + '\n')
         decode_f.write(pair[1] + '\n')
-  logging.info(f'Dataset written to {save_path}')
+  logging.info('Dataset written to %s', save_path)
 
 
 def write_token_vocab(words,
@@ -137,15 +110,15 @@ def write_token_vocab(words,
   # Sort tokens by frequency and then lexically to break ties.
   words_with_counts = words.most_common()
   words_with_counts.sort(key=lambda x: (x[1], x[0]), reverse=True)
-  vocab_path = os.path.join(save_path, f'vocab.{problem}.tokens')
+  vocab_path = os.path.join(save_path, 'vocab.%s.tokens' % problem)
 
   with gfile.GFile(vocab_path, 'w') as f:
     # Tensor2tensor needs these additional tokens.
     f.write('<pad>\n<EOS>\n<OOV>\n')
     for word, _ in words_with_counts:
-      f.write(f'{word}\n')
-  logging.info(f'Token vocabulary written to {vocab_path} ({len(words)} '
-               'distinct tokens).')
+      f.write(word + '\n')
+  logging.info('Token vocabulary written to %s (%s distinct tokens).',
+               vocab_path, len(words))
 
 
 def get_lines(path, filename):

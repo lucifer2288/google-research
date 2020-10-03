@@ -16,9 +16,42 @@
 """Util functions used for testing."""
 
 import numpy as np
-from kws_streaming.layers import dataframe
+from kws_streaming.layers import data_frame
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.modes import Modes
+from kws_streaming.train import model_flags
+
+
+class Params(object):
+  """Parameters for data and other settings.
+
+  Attributes:
+    cnn_strides: list of strides
+    clip_duration_ms: duration of audio clipl in ms
+    sample_rate: sample rate of the data
+    preprocess: method of preprocessing
+    data_shape: shape of the data in streaming inference mode
+    batch_size: batch size
+    desired_samples: number of samples in one sequence
+  """
+
+  def __init__(self, cnn_strides, clip_duration_ms=16):
+    self.sample_rate = 16000
+    self.clip_duration_ms = clip_duration_ms
+
+    # it is a special case to customize input data shape
+    self.preprocess = 'custom'
+
+    # defines the step of feeding input data
+    self.data_shape = (np.prod(cnn_strides),)
+
+    self.batch_size = 1
+    self.desired_samples = int(
+        self.sample_rate * self.clip_duration_ms / model_flags.MS_PER_SECOND)
+
+    # align data length with the step
+    self.desired_samples = (
+        self.desired_samples // self.data_shape[0]) * self.data_shape[0]
 
 
 def get_test_batch_features_and_labels_numpy(input_shape=None,
@@ -98,7 +131,7 @@ class FrameTestBase(tf.test.TestCase):
     self.signal = np.random.rand(self.inference_batch_size, self.data_size)
 
     # non streaming frame extraction based on tf.signal.frame
-    data_frame_tf = dataframe.DataFrame(
+    data_frame_tf = data_frame.DataFrame(
         mode=Modes.TRAINING,
         inference_batch_size=self.inference_batch_size,
         frame_size=self.frame_size,

@@ -34,7 +34,6 @@ using ::std::equal;          // NOLINT
 using ::std::function;       // NOLINT
 using ::std::set;            // NOLINT
 using ::std::unique_ptr;     // NOLINT
-// NOLINT
 using ::std::unordered_set;  // NOLINT
 using ::std::vector;         // NOLINT
 

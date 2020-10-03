@@ -14,9 +14,11 @@
 # limitations under the License.
 
 # Lint as: python3
-"""Beam job to try a bunch of hparams.
+# pylint:disable=line-too-long
+r"""Beam job to try a bunch of hparams.
 
 """
+# pylint:enable=line-too-long
 
 import itertools
 import os
@@ -39,6 +41,10 @@ flags.DEFINE_list('embedding_list', None, 'Python list of embedding names.')
 flags.DEFINE_string('label_name', None, 'Name of label to use.')
 flags.DEFINE_list('label_list', None, 'Python list of possible label values.')
 flags.DEFINE_string('speaker_id_name', None, '`None`, or speaker ID field.')
+flags.DEFINE_string('save_model_dir', None, 'If not `None`, save sklearn '
+                    'models in this directory.')
+flags.DEFINE_enum('eval_metric', 'accuracy', ['accuracy', 'equal_error_rate'],
+                  'Which metric to compute and report.')
 
 FLAGS = flags.FLAGS
 
@@ -72,19 +78,24 @@ def main(unused_argv):
   exp_params = []
   model_names = models.get_sklearn_models().keys()
   for elem in itertools.product(*[FLAGS.embedding_list, model_names]):
-    exp_params.append({
-        'embedding_name': elem[0],
-        'model_name': elem[1],
-        'label_name': FLAGS.label_name,
-        'label_list': FLAGS.label_list,
-        'train_glob': FLAGS.train_glob,
-        'eval_glob': FLAGS.eval_glob,
-        'test_glob': FLAGS.test_glob,
-        # Either L2 normalization or speaker normalization. You could try both
-        # if you wanted.
-        'l2_normalization': FLAGS.speaker_id_name is None,
-        'speaker_id_name': FLAGS.speaker_id_name,
-    })
+    def _params_dict(l2_normalization, elem=elem):
+      return {
+          'embedding_name': elem[0],
+          'model_name': elem[1],
+          'label_name': FLAGS.label_name,
+          'label_list': FLAGS.label_list,
+          'train_glob': FLAGS.train_glob,
+          'eval_glob': FLAGS.eval_glob,
+          'test_glob': FLAGS.test_glob,
+          # Either L2 normalization or speaker normalization. You could try both
+          # if you wanted.
+          'l2_normalization': l2_normalization,
+          'speaker_id_name': FLAGS.speaker_id_name,
+          'save_model_dir': FLAGS.save_model_dir,
+          'eval_metric': FLAGS.eval_metric,
+      }
+    exp_params.append(_params_dict(l2_normalization=True))
+    exp_params.append(_params_dict(l2_normalization=False))
 
   # Make and run beam pipeline.
   beam_options = None
@@ -96,6 +107,7 @@ def main(unused_argv):
          | 'CalcScores' >> beam.Map(
              lambda d: (d, train_and_eval_sklearn.train_and_get_score(**d)))
          | 'FormatText' >> beam.Map(format_text_line)
+         | 'Reshuffle' >> beam.Reshuffle()
          | 'WriteOutput' >> beam.io.WriteToText(FLAGS.output_file, num_shards=1)
         )
 

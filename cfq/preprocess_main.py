@@ -13,14 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Lint as: python3
 """Preprocesses a specific split of the CFQ dataset."""
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-import os
 
 from absl import app
 from absl import flags
@@ -29,10 +22,10 @@ import preprocess as preprocessor
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string('dataset_path', None, 'Path to the JSON file containing '
-                    'the dataset.')
+flags.DEFINE_string('dataset', None,
+                    'Name of the TFDS dataset. Use cfq or scan.')
 
-flags.DEFINE_string('split_path', None, 'Path to the JSON file containing '
+flags.DEFINE_string('split', None, 'Name of the  to the JSON file containing '
                     'split information.')
 
 flags.DEFINE_string('save_path', None, 'Path to the directory where to '
@@ -40,17 +33,12 @@ flags.DEFINE_string('save_path', None, 'Path to the directory where to '
 
 flags.mark_flag_as_required('save_path')
 
-flags.register_validator('dataset_path', os.path.exists, 'Dataset not found.')
-flags.register_validator('split_path', os.path.exists, 'Split not found.')
-
 
 def main(argv):
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 
-  dataset = preprocessor.get_dataset(
-      preprocessor.load_dataset(FLAGS.dataset_path),
-      preprocessor.load_json(FLAGS.split_path))
+  dataset = preprocessor.get_dataset_from_tfds(FLAGS.dataset, FLAGS.split)
   preprocessor.write_dataset(dataset, FLAGS.save_path)
   token_vocab = preprocessor.get_token_vocab(FLAGS.save_path)
   preprocessor.write_token_vocab(token_vocab, FLAGS.save_path)
