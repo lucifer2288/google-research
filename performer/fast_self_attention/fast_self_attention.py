@@ -19,7 +19,7 @@ Implementation of the approximate fast softmax and generalized
 attention mechanism leveraging structured random feature maps [RFM] techniques
 and low rank decomposition of the attention matrix.
 """
-# pylint: disable=invalid-name, missing-function-docstring
+# pylint: disable=invalid-name, missing-function-docstring, line-too-long
 
 import abc
 from collections.abc import Iterable  # pylint: disable=g-importing-member
@@ -38,11 +38,15 @@ gin.external_configurable(jnp.cos, 'jcos')
 gin.external_configurable(jnp.sin, 'jsin')
 gin.external_configurable(jnp.tanh, 'jtanh')
 gin.external_configurable(jax.nn.sigmoid, 'jsigmoid')
-gin.external_configurable(jax.nn.relu, 'jrelu')
+gin.external_configurable(
+    lambda x: jax.nn.gelu(x, approximate=False), 'jgelu'
+)  # Needs to be exact, although might be slower. See https://github.com/google/jax/issues/4428.
 gin.external_configurable(lambda x: x * x * (x > 0.0), 'jrequ')
-gin.external_configurable(jax.nn.gelu, 'jgelu')
 gin.external_configurable(jnp.exp, 'jexp')
 gin.external_configurable(lambda x: x, 'jidentity')
+gin.external_configurable(
+    lambda x: (jnp.exp(x)) * (x <= 0.0) + (x + 1.0) * (x > 0.0), 'jshiftedelu'
+)  # Nonlinearity used in "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention" (https://arxiv.org/abs/2006.16236).
 
 
 def nonnegative_softmax_kernel_feature_creator(data,
@@ -202,7 +206,7 @@ def make_fast_softmax_attention(qkv_dim,
                                 numerical_stabilizer=0.000001,
                                 nb_features=256,
                                 ortho_features=True,
-                                ortho_scaling=1.0,
+                                ortho_scaling=0.0,
                                 redraw_features=True,
                                 unidirectional=False,
                                 nonnegative_features=True,
@@ -430,75 +434,89 @@ class FastAttention(object):
     raise NotImplementedError('Abstract method')
 
 
-def _numerator_fwd(z_slice_shape, precision, qs, ks, vs):
-  def body(p, qkv):
-    (q, k, v) = qkv
-    p += jnp.einsum('...m,...d->...md', k, v, precision=precision)
-    X_slice = jnp.einsum('...m,...md->...d', q, p, precision=precision)
-    return p, X_slice
-  init_value = jnp.zeros(z_slice_shape)
-  p, W = lax.scan(body, init_value, (qs, ks, vs))
-  return W, (p, qs, ks, vs)
+def _numerator(z_slice_shape, precision, unroll=1):
+
+  def fwd(qs, ks, vs):
+
+    def body(p, qkv):
+      (q, k, v) = qkv
+      p += jnp.einsum('...m,...d->...md', k, v, precision=precision)
+      X_slice = jnp.einsum('...m,...md->...d', q, p, precision=precision)
+      return p, X_slice
+
+    init_value = jnp.zeros(z_slice_shape)
+    p, W = lax.scan(body, init_value, (qs, ks, vs), unroll=unroll)
+    return W, (p, qs, ks, vs)
+
+  def bwd(pqkv, W_ct):
+
+    def body(carry, qkv_xct):
+      p, p_ct = carry
+      q, k, v, x_ct = qkv_xct
+      q_ct = jnp.einsum('...d,...md->...m', x_ct, p, precision=precision)
+      p_ct += jnp.einsum('...d,...m->...md', x_ct, q, precision=precision)
+      k_ct = jnp.einsum('...md,...d->...m', p_ct, v, precision=precision)
+      v_ct = jnp.einsum('...md,...m->...d', p_ct, k, precision=precision)
+      p -= jnp.einsum('...m,...d->...md', k, v, precision=precision)
+      return (p, p_ct), (q_ct, k_ct, v_ct)
+
+    p, qs, ks, vs = pqkv
+    _, (qs_ct, ks_ct, vs_ct) = lax.scan(
+        body, (p, jnp.zeros_like(p)), (qs, ks, vs, W_ct),
+        reverse=True,
+        unroll=unroll)
+    return qs_ct, ks_ct, vs_ct
+
+  @jax.custom_vjp
+  def _numerator_impl(qs, ks, vs):
+    W, _ = fwd(qs, ks, vs)
+    return W
+
+  _numerator_impl.defvjp(fwd, bwd)
+
+  return _numerator_impl
 
 
-def _numerator_bwd(z_slice_shape, precision, pqkv, W_ct):
-  del z_slice_shape
-  def body(carry, qkv_xct):
-    p, p_ct = carry
-    q, k, v, x_ct = qkv_xct
-    q_ct = jnp.einsum('...d,...md->...m', x_ct, p, precision=precision)
-    p_ct += jnp.einsum('...d,...m->...md', x_ct, q, precision=precision)
-    k_ct = jnp.einsum('...md,...d->...m', p_ct, v, precision=precision)
-    v_ct = jnp.einsum('...md,...m->...d', p_ct, k, precision=precision)
-    p -= jnp.einsum('...m,...d->...md', k, v, precision=precision)
-    return (p, p_ct), (q_ct, k_ct, v_ct)
-  p, qs, ks, vs = pqkv
-  _, (qs_ct, ks_ct, vs_ct) = lax.scan(
-      body, (p, jnp.zeros_like(p)), (qs, ks, vs, W_ct), reverse=True)
-  return qs_ct, ks_ct, vs_ct
+def _denominator(t_slice_shape, precision, unroll=1):
 
+  def fwd(qs, ks):
 
-@functools.partial(jax.custom_vjp, nondiff_argnums=(0, 1))
-def _numerator(z_slice_shape, precision, qs, ks, vs):
-  W, _ = _numerator_fwd(z_slice_shape, precision, qs, ks, vs)
-  return W
+    def body(p, qk):
+      q, k = qk
+      p += k
+      x = jnp.einsum('...m,...m->...', q, p, precision=precision)
+      return p, x
 
-_numerator.defvjp(_numerator_fwd, _numerator_bwd)
+    p = jnp.zeros(t_slice_shape)
+    p, R = lax.scan(body, p, (qs, ks), unroll=unroll)
+    return R, (qs, ks, p)
 
+  def bwd(qkp, R_ct):
 
-def _denominator_fwd(t_slice_shape, precision, qs, ks):
-  def body(p, qk):
-    q, k = qk
-    p += k
-    x = jnp.einsum('...m,...m->...', q, p, precision=precision)
-    return p, x
+    def body(carry, qkx):
+      p, p_ct = carry
+      q, k, x_ct = qkx
+      q_ct = jnp.einsum('...,...m->...m', x_ct, p, precision=precision)
+      p_ct += jnp.einsum('...,...m->...m', x_ct, q, precision=precision)
+      k_ct = p_ct
+      p -= k
+      return (p, p_ct), (q_ct, k_ct)
 
-  p = jnp.zeros(t_slice_shape)
-  p, R = lax.scan(body, p, (qs, ks))
-  return R, (qs, ks, p)
+    qs, ks, p = qkp
+    _, (qs_ct, ks_ct) = lax.scan(
+        body, (p, jnp.zeros_like(p)), (qs, ks, R_ct),
+        reverse=True,
+        unroll=unroll)
+    return (qs_ct, ks_ct)
 
+  @jax.custom_vjp
+  def _denominator_impl(qs, ks):
+    R, _ = fwd(qs, ks)
+    return R
 
-def _denominator_bwd(_t_slice_shape, precision, qkp, R_ct):
-  def body(carry, qkx):
-    p, p_ct = carry
-    q, k, x_ct = qkx
-    q_ct = jnp.einsum('...,...m->...m', x_ct, p, precision=precision)
-    p_ct += jnp.einsum('...,...m->...m', x_ct, q, precision=precision)
-    k_ct = p_ct
-    p -= k
-    return (p, p_ct), (q_ct, k_ct)
-  qs, ks, p = qkp
-  _, (qs_ct, ks_ct) = lax.scan(body, (p, jnp.zeros_like(p)),
-                               (qs, ks, R_ct), reverse=True)
-  return (qs_ct, ks_ct)
+  _denominator_impl.defvjp(fwd, bwd)
 
-
-@functools.partial(jax.custom_vjp, nondiff_argnums=(0, 1))
-def _denominator(t_slice_shape, precision, qs, ks):
-  R, _ = _denominator_fwd(t_slice_shape, precision, qs, ks)
-  return R
-
-_denominator.defvjp(_denominator_fwd, _denominator_bwd)
+  return _denominator_impl
 
 
 class FastAttentionviaLowRankDecomposition(FastAttention):
@@ -599,10 +617,10 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
       z_slice_shape = key_prime.shape[0:len(batch_dims_t)] + (
           key_prime.shape[-1],) + (value.shape[-1],)
 
-      W = _numerator(z_slice_shape, precision,
-                     jnp.moveaxis(query_prime, index, 0),
-                     jnp.moveaxis(key_prime, index, 0),
-                     jnp.moveaxis(value, index, 0))
+      numerator_fn = _numerator(z_slice_shape, precision, self.lax_scan_unroll)
+      W = numerator_fn(
+          jnp.moveaxis(query_prime, index, 0),
+          jnp.moveaxis(key_prime, index, 0), jnp.moveaxis(value, index, 0))
 
       # Constructing W = (Q^{'}(K^{'})^{T})_{masked}V
       W = jnp.moveaxis(W, 0, index)
@@ -620,9 +638,11 @@ class FastAttentionviaLowRankDecomposition(FastAttention):
         index = attention_dims_t[0]
         t_slice_shape = key_prime.shape[0:len(batch_dims_t)] + (
             key_prime.shape[-1],)
-        R = _denominator(t_slice_shape, precision,
-                         jnp.moveaxis(query_prime, index, 0),
-                         jnp.moveaxis(key_prime, index, 0))
+        denominator_fn = _denominator(t_slice_shape, precision,
+                                      self.lax_scan_unroll)
+        R = denominator_fn(
+            jnp.moveaxis(query_prime, index, 0),
+            jnp.moveaxis(key_prime, index, 0))
 
         R = jnp.moveaxis(R, 0, index)
     else:
@@ -695,4 +715,3 @@ def _invert_perm(perm):
   for i, j in enumerate(perm):
     perm_inv[j] = i
   return tuple(perm_inv)
-

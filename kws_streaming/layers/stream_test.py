@@ -14,15 +14,15 @@
 # limitations under the License.
 
 """Tests for kws_streaming.layers.stream."""
-import random as rn
+
 from absl.testing import parameterized
 import numpy as np
+from kws_streaming.layers import modes
 from kws_streaming.layers import stream
 from kws_streaming.layers import temporal_padding
 from kws_streaming.layers import test_utils
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.compat import tf1
-from kws_streaming.layers.modes import Modes
 from kws_streaming.models import utils
 from kws_streaming.train import test
 tf1.disable_eager_execution()
@@ -45,13 +45,14 @@ class Sum(tf.keras.layers.Layer):
     return dict(list(base_config.items()) + list(config.items()))
 
 
-def conv_model(flags, cnn_filters, cnn_kernel_size, cnn_act, cnn_dilation_rate,
-               cnn_strides, cnn_use_bias):
+def conv_model(flags, conv_cell, cnn_filters, cnn_kernel_size, cnn_act,
+               cnn_dilation_rate, cnn_strides, cnn_use_bias):
   """Toy example of convolutional model with Stream wrapper.
 
   It can be used for speech enhancement.
   Args:
       flags: model and data settings
+      conv_cell: cell for streaming, for example: tf.keras.layers.Conv1D
       cnn_filters: list of filters in conv layer
       cnn_kernel_size: list of kernel_size in conv layer
       cnn_act: list of activation functions in conv layer
@@ -83,7 +84,7 @@ def conv_model(flags, cnn_filters, cnn_kernel_size, cnn_act, cnn_dilation_rate,
                         cnn_dilation_rate, cnn_strides, cnn_use_bias):
 
     net = stream.Stream(
-        cell=tf.keras.layers.Conv1D(
+        cell=conv_cell(
             filters=filters,
             kernel_size=kernel_size,
             activation=activation,
@@ -97,14 +98,16 @@ def conv_model(flags, cnn_filters, cnn_kernel_size, cnn_act, cnn_dilation_rate,
   return tf.keras.Model(input_audio, net)
 
 
-def conv_model_no_stream_wrapper(flags, cnn_filters, cnn_kernel_size, cnn_act,
-                                 cnn_dilation_rate, cnn_strides, cnn_use_bias):
+def conv_model_no_stream_wrapper(flags, conv_cell, cnn_filters, cnn_kernel_size,
+                                 cnn_act, cnn_dilation_rate, cnn_strides,
+                                 cnn_use_bias):
   """Toy example of convolutional model.
 
   It has the same model topology as in conv_model() above, but without
   wrapping conv cell by Stream layer, so that all parameters set manually.
   Args:
       flags: model and data settings
+      conv_cell: cell for streaming, for example: tf.keras.layers.Conv1D
       cnn_filters: list of filters in conv layer
       cnn_kernel_size: list of kernel_size in conv layer
       cnn_act: list of activation functions in conv layer
@@ -145,7 +148,7 @@ def conv_model_no_stream_wrapper(flags, cnn_filters, cnn_kernel_size, cnn_act,
         padding='causal', padding_size=padding_size)(
             net)
 
-    net = tf.keras.layers.Conv1D(
+    net = conv_cell(
         filters=filters,
         kernel_size=kernel_size,
         activation=activation,
@@ -161,10 +164,7 @@ class StreamTest(tf.test.TestCase, parameterized.TestCase):
 
   def setUp(self):
     super(StreamTest, self).setUp()
-    seed = 123
-    np.random.seed(seed)
-    rn.seed(seed)
-    tf.random.set_seed(seed)
+    test_utils.set_seed(123)
 
   def test_streaming_with_effective_tdim(self):
     time_size = 10
@@ -179,7 +179,7 @@ class StreamTest(tf.test.TestCase, parameterized.TestCase):
         batch_size=batch_size,
         name='inp_sequence')
 
-    mode = Modes.TRAINING
+    mode = modes.Modes.TRAINING
 
     # in streaming mode it will create a
     # ring buffer with time dim size ring_buffer_size_in_time_dim
@@ -190,7 +190,7 @@ class StreamTest(tf.test.TestCase, parameterized.TestCase):
     model_train = tf.keras.Model(inputs, outputs)
     model_train.summary()
 
-    mode = Modes.STREAM_EXTERNAL_STATE_INFERENCE
+    mode = modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE
     input_tensors = [
         tf.keras.layers.Input(
             shape=(
@@ -239,20 +239,33 @@ class StreamTest(tf.test.TestCase, parameterized.TestCase):
 
     # set it in train mode (in stream mode padding is not applied)
     net = stream.Stream(
-        mode=Modes.TRAINING,
+        mode=modes.Modes.TRAINING,
         cell=tf.keras.layers.Lambda(lambda x: x),
         ring_buffer_size_in_time_dim=kernel_size,
         pad_time_dim=padding)(inputs)
     model = tf.keras.Model(inputs, net)
 
-    np.random.seed(1)
+    test_utils.set_seed(1)
     input_signal = np.random.rand(batch_size, time_dim, feature_dim)
     outputs = model.predict(input_signal)
     self.assertAllEqual(outputs.shape,
                         [batch_size, time_dim + kernel_size - 1, feature_dim])
 
-  @parameterized.parameters(conv_model, conv_model_no_stream_wrapper)
-  def test_stream_strided_convolution(self, get_model):
+  @parameterized.named_parameters(
+      {
+          'testcase_name': 'model with stream wrapper on Conv1D',
+          'get_model': conv_model,
+          'conv_cell': tf.keras.layers.Conv1D
+      }, {
+          'testcase_name': 'model with stream wrapper on SeparableConv1D',
+          'get_model': conv_model,
+          'conv_cell': tf.keras.layers.SeparableConv1D
+      }, {
+          'testcase_name': 'model without stream wrapper on Conv1D',
+          'get_model': conv_model_no_stream_wrapper,
+          'conv_cell': tf.keras.layers.Conv1D
+      })
+  def test_stream_strided_convolution(self, get_model, conv_cell):
     # Test streaming convolutional layers with striding, dilation.
     cnn_filters = [1, 1, 1, 1]
     cnn_kernel_size = [3, 3, 3, 3]
@@ -269,13 +282,13 @@ class StreamTest(tf.test.TestCase, parameterized.TestCase):
                        x) + np.random.rand(1, params.desired_samples) * 0.5
 
     # prepare non stream model
-    model = get_model(params, cnn_filters, cnn_kernel_size, cnn_act,
-                      cnn_dilation_rate, cnn_strides, cnn_use_bias)
+    model = get_model(params, conv_cell, cnn_filters, cnn_kernel_size,
+                      cnn_act, cnn_dilation_rate, cnn_strides, cnn_use_bias)
     model.summary()
 
     # prepare streaming model
     model_stream = utils.to_streaming_inference(
-        model, params, Modes.STREAM_INTERNAL_STATE_INFERENCE)
+        model, params, modes.Modes.STREAM_INTERNAL_STATE_INFERENCE)
     model_stream.summary()
 
     # run inference

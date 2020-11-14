@@ -15,7 +15,6 @@
 
 """Base parser with training/testing data speech features flags ."""
 
-
 import argparse
 from absl import logging
 
@@ -115,6 +114,15 @@ def base_parser():
       default=100.0,
       help="""\
       Range to randomly shift the training audio by in time.
+      It is done during audio data reading.
+      """)
+  parser.add_argument(
+      '--sp_time_shift_ms',
+      type=float,
+      default=0.0,
+      help="""\
+      Range to randomly shift the training audio by in time.
+      It is dones in speech feature extractor.
       """)
   parser.add_argument(
       '--testing_percentage',
@@ -213,6 +221,13 @@ def base_parser():
       type=float,
       default=0.15,
       help='Resample input signal to generate more data [0.0...0.15].',
+  )
+  parser.add_argument(
+      '--sp_resample',
+      type=float,
+      default=0.0,
+      help='Resample input signal to generate more data [0.0...0.15]. '
+      'It is dones in speech feature extractor. '
   )
   parser.add_argument(
       '--volume_resample',
@@ -371,6 +386,30 @@ def base_parser():
       help='SpecAugment parameter frequency_mask_max_size.',
   )
   parser.add_argument(
+      '--use_spec_cutout',
+      type=int,
+      default=0,
+      help='use SpecCutout',
+  )
+  parser.add_argument(
+      '--spec_cutout_masks_number',
+      type=int,
+      default=3,
+      help='SpecCutout number of masks',
+  )
+  parser.add_argument(
+      '--spec_cutout_time_mask_size',
+      type=int,
+      default=10,
+      help='SpecCutout masks size in time dim',
+  )
+  parser.add_argument(
+      '--spec_cutout_frequency_mask_size',
+      type=int,
+      default=5,
+      help='SpecCutout masks size in frequency dim',
+  )
+  parser.add_argument(
       '--return_softmax',
       type=int,
       default=0,
@@ -402,6 +441,12 @@ def base_parser():
       default=0,
       help='Determines whether to use Adam style exponential moving averaging '
       'for the first order moments',
+  )
+  parser.add_argument(
+      '--pick_deterministically',
+      type=int,
+      default=0,
+      help='Pick training data in every epoch deterministically',
   )
 
   return parser

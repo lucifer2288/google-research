@@ -239,7 +239,7 @@ def standardize_points(points):
 def compute_procrustes_alignment_params(target_points,
                                         source_points,
                                         point_masks=None):
-  """Computes procrustes alignment parameters.
+  """Computes Procrustes alignment parameters.
 
   Args:
     target_points: A tensor for target points. Shape = [..., num_points,
@@ -470,7 +470,7 @@ def random_rotate_and_project_3d_to_2d(keypoints_3d,
   """Randomly rotates and projects 3D keypoints to 2D.
 
   Args:
-    keypoints_3d: A tensor for 3D keypoints. Shape = [..., 3].
+    keypoints_3d: A tensor for 3D keypoints. Shape = [..., num_keypoints, 3].
     azimuth_range: A tuple for minimum and maximum azimuth angles to randomly
       rotate 3D keypoints with.
     elevation_range: A tuple for minimum and maximum elevation angles to

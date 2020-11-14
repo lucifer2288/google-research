@@ -15,11 +15,18 @@
 
 """Util functions used for testing."""
 
+import random
 import numpy as np
 from kws_streaming.layers import data_frame
+from kws_streaming.layers import modes
 from kws_streaming.layers.compat import tf
-from kws_streaming.layers.modes import Modes
-from kws_streaming.train import model_flags
+from kws_streaming.models import model_flags
+
+
+def set_seed(seed):
+  random.seed(seed)
+  np.random.seed(seed)
+  tf.random.set_seed(seed)
 
 
 class Params(object):
@@ -126,13 +133,13 @@ class FrameTestBase(tf.test.TestCase):
     self.inference_batch_size = 1
 
     # generate input signal
-    np.random.seed(1)
+    set_seed(1)
     self.data_size = 33
     self.signal = np.random.rand(self.inference_batch_size, self.data_size)
 
     # non streaming frame extraction based on tf.signal.frame
     data_frame_tf = data_frame.DataFrame(
-        mode=Modes.TRAINING,
+        mode=modes.Modes.TRAINING,
         inference_batch_size=self.inference_batch_size,
         frame_size=self.frame_size,
         frame_step=self.frame_step)
