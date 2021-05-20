@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -148,7 +148,7 @@ def map_oneofs_with_tuple_paths(
     A copy of `structure` with new values substituted for its OneOf nodes.
   """
 
-  prefix = ()  # type: Tuple[Union[int, str]]
+  prefix = ()  # type: Tuple[Union[int, str]]  # pytype: disable=annotation-type-mismatch
   return _map_oneofs_helper(func, structure, prefix)
 
 

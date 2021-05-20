@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,11 @@
 #include "scann/utils/reordering_helper.h"
 
 #include <atomic>
+#include <cstdint>
 #include <limits>
 #include <memory>
 
+#include "absl/status/status.h"
 #include "absl/strings/str_format.h"
 #include "scann/data_format/datapoint.h"
 #include "scann/data_format/dataset.h"
@@ -34,27 +36,21 @@
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/prefetch.h"
 
-namespace tensorflow {
-namespace scann_ops {
-
+namespace research_scann {
 namespace one_to_many_low_level {
 
 #ifdef __x86_64__
 
-#define SCANN_SIMD_INLINE SCANN_SIMD_ATTRIBUTE SCANN_INLINE
-#define SCANN_SIMD_INLINE_LAMBDA SCANN_SIMD_ATTRIBUTE SCANN_INLINE_LAMBDA
-#define SCANN_SIMD_OUTLINE SCANN_SIMD_ATTRIBUTE SCANN_OUTLINE
-
 namespace avx1 {
-using AvxFuncs = ::tensorflow::scann_ops::AvxFunctionsAvx;
-#define SCANN_SIMD_ATTRIBUTE SCANN_AVX1_ATTRIBUTE
+using AvxFuncs = ::research_scann::AvxFunctionsAvx;
+#define SCANN_SIMD_ATTRIBUTE SCANN_AVX1
 #include "scann/distance_measures/one_to_many/one_to_many_impl.inc"
 #undef SCANN_SIMD_ATTRIBUTE
 }  // namespace avx1
 
 namespace avx2 {
-using AvxFuncs = ::tensorflow::scann_ops::AvxFunctionsAvx2Fma;
-#define SCANN_SIMD_ATTRIBUTE SCANN_AVX2_ATTRIBUTE
+using AvxFuncs = ::research_scann::AvxFunctionsAvx2Fma;
+#define SCANN_SIMD_ATTRIBUTE SCANN_AVX2
 #include "scann/distance_measures/one_to_many/one_to_many_impl.inc"
 #undef SCANN_SIMD_ATTRIBUTE
 }  // namespace avx2
@@ -360,90 +356,6 @@ ExactReorderingHelper<T>::ComputeTop1ReorderingDistance(
   return std::make_pair(idx, smallest);
 }
 
-template <typename T>
-Status CompressedReorderingHelper<T>::ComputeDistancesForReordering(
-    const DatapointPtr<T>& query, NNResultsVector* result) const {
-  DCHECK(compressed_dataset_);
-  asymmetric_hashing2::QueryerOptions<> opts;
-  if (compressed_dataset_) {
-    opts.hashed_dataset = std::make_shared<DefaultDenseDatasetView<uint8_t>>(
-        *compressed_dataset_);
-  }
-  TF_ASSIGN_OR_RETURN(auto lookup_table, compressed_queryer_->CreateLookupTable(
-                                             query, lookup_type_));
-  return compressed_queryer_->PopulateDistances(lookup_table, opts,
-                                                MakeMutableSpan(*result));
-}
-
-template <typename T>
-StatusOr<std::pair<DatapointIndex, float>>
-CompressedReorderingHelper<T>::ComputeTop1ReorderingDistance(
-    const DatapointPtr<T>& query, NNResultsVector* result) const {
-  DCHECK(compressed_dataset_);
-  asymmetric_hashing2::QueryerOptions<> opts;
-  if (compressed_dataset_) {
-    opts.hashed_dataset = std::make_shared<DefaultDenseDatasetView<uint8_t>>(
-        *compressed_dataset_);
-  }
-  TF_ASSIGN_OR_RETURN(auto lookup_table, compressed_queryer_->CreateLookupTable(
-                                             query, lookup_type_));
-  SCANN_RETURN_IF_ERROR(compressed_queryer_->PopulateDistances(
-      lookup_table, opts, MakeMutableSpan(*result)));
-  float smallest = std::numeric_limits<float>::max();
-  DatapointIndex idx = kInvalidDatapointIndex;
-  for (auto& elem : *result) {
-    float dist = elem.second;
-    idx = dist < smallest ? elem.first : idx;
-    smallest = std::min(smallest, dist);
-  }
-  return std::make_pair(idx, smallest);
-}
-
-template <typename T>
-Status CompressedResidualReorderingHelper<T>::ComputeDistancesForReordering(
-    const DatapointPtr<T>& query, NNResultsVector* result) const {
-  DCHECK(compressed_dataset_);
-  asymmetric_hashing2::QueryerOptions<> opts;
-  if (compressed_dataset_) {
-    opts.hashed_dataset = std::make_shared<DefaultDenseDatasetView<uint8_t>>(
-        *compressed_dataset_);
-  }
-  TF_ASSIGN_OR_RETURN(auto lookup_table, compressed_queryer_->CreateLookupTable(
-                                             query, lookup_type_));
-  auto residual_terms = *result;
-  SCANN_RETURN_IF_ERROR(compressed_queryer_->PopulateDistances(
-      lookup_table, opts, MakeMutableSpan(residual_terms)));
-  for (size_t i = 0; i < residual_terms.size(); ++i) {
-    (*result)[i].second += residual_terms[i].second;
-  }
-  return OkStatus();
-}
-
-template <typename T>
-StatusOr<std::pair<DatapointIndex, float>>
-CompressedResidualReorderingHelper<T>::ComputeTop1ReorderingDistance(
-    const DatapointPtr<T>& query, NNResultsVector* result) const {
-  DCHECK(compressed_dataset_);
-  asymmetric_hashing2::QueryerOptions<> opts;
-  if (compressed_dataset_) {
-    opts.hashed_dataset = std::make_shared<DefaultDenseDatasetView<uint8_t>>(
-        *compressed_dataset_);
-  }
-  TF_ASSIGN_OR_RETURN(auto lookup_table, compressed_queryer_->CreateLookupTable(
-                                             query, lookup_type_));
-  auto residual_terms = *result;
-  SCANN_RETURN_IF_ERROR(compressed_queryer_->PopulateDistances(
-      lookup_table, opts, MakeMutableSpan(residual_terms)));
-  float smallest = std::numeric_limits<float>::max();
-  DatapointIndex idx = kInvalidDatapointIndex;
-  for (size_t i = 0; i < residual_terms.size(); ++i) {
-    float dist = result->at(i).second + residual_terms[i].second;
-    idx = dist < smallest ? i : idx;
-    smallest = std::min(smallest, dist);
-  }
-  return std::make_pair(idx, smallest);
-}
-
 FixedPointFloatDenseDotProductReorderingHelper::
     FixedPointFloatDenseDotProductReorderingHelper(
         const DenseDataset<float>& exact_reordering_dataset,
@@ -643,8 +555,5 @@ FixedPointFloatDenseLimitedInnerReorderingHelper::ComputeTop1ReorderingDistance(
 }
 
 SCANN_INSTANTIATE_TYPED_CLASS(, ExactReorderingHelper);
-SCANN_INSTANTIATE_TYPED_CLASS(, CompressedReorderingHelper);
-SCANN_INSTANTIATE_TYPED_CLASS(, CompressedResidualReorderingHelper);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

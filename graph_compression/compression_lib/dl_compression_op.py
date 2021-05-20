@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -234,20 +234,22 @@ class DLCompressionOp(compression_op.CompressionOp):
   def add_compression_summaries(self):
     """Adds summaries of alpha value, new variables, and last update step."""
     with tf.name_scope(self._spec.name + '_summaries'):
-      tf.summary.scalar(
+      tf.compat.v2.summary.scalar(
           self._last_alpha_update_step.op.name + '/last_alpha_update_step',
           self._last_alpha_update_step)
-      tf.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
-      tf.summary.scalar(self.a_matrix_tfvar.op.name + '/a_matrix_norm',
-                        tf.norm(self.a_matrix_tfvar))
-      tf.summary.scalar(
+      tf.compat.v2.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
+      tf.compat.v2.summary.scalar(
+          self.a_matrix_tfvar.op.name + '/a_matrix_norm',
+          tf.norm(self.a_matrix_tfvar))
+      tf.compat.v2.summary.scalar(
           self.b_matrix_indices_tfvar.op.name + '/b_matrix_indices_size',
           tf.size(self.b_matrix_indices_tfvar))
-      tf.summary.scalar(
+      tf.compat.v2.summary.scalar(
           self.b_matrix_values_tfvar.op.name + '/b_matrix_values_norm',
           tf.norm(self.b_matrix_values_tfvar))
-      tf.summary.scalar(self.c_matrix_tfvar.op.name + '/c_matrix_norm',
-                        tf.norm(self.c_matrix_tfvar))
+      tf.compat.v2.summary.scalar(
+          self.c_matrix_tfvar.op.name + '/c_matrix_norm',
+          tf.norm(self.c_matrix_tfvar))
 
   def run_update_step(self, session, step_number=None):
     """Returns the combine update tf OP."""

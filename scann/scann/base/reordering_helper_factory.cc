@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@
 #include "scann/oss_wrappers/scann_down_cast.h"
 #include "scann/oss_wrappers/scann_malloc_extension.h"
 #include "scann/projection/projection_factory.h"
-#include "scann/proto/compressed_reordering.pb.h"
 #include "scann/proto/distance_measure.pb.h"
 #include "scann/proto/exact_reordering.pb.h"
 #include "scann/utils/reordering_helper.h"
@@ -28,8 +27,7 @@
 
 using std::move;
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 using StatusOrHelper = StatusOr<unique_ptr<ReorderingInterface<T>>>;
@@ -138,14 +136,7 @@ ReorderingHelperFactory<T>::Build(
     const ScannConfig& config,
     const shared_ptr<const DistanceMeasure>& reordering_dist,
     shared_ptr<TypedDataset<T>> dataset, SingleMachineFactoryOptions* opts) {
-  if (config.has_compressed_reordering() && config.has_exact_reordering()) {
-    return InvalidArgumentError(
-        "Compressed and exact reordering may not be enabled in the same "
-        "ScannConfig.");
-  }
-  if (config.has_compressed_reordering()) {
-    return InvalidArgumentError("Compressed reordering not supported.");
-  } else if (config.has_exact_reordering()) {
+  if (config.has_exact_reordering()) {
     return ExactReorderingFactory<T>(config.exact_reordering(), reordering_dist,
                                      dataset, opts);
   } else {
@@ -155,5 +146,4 @@ ReorderingHelperFactory<T>::Build(
 
 SCANN_INSTANTIATE_TYPED_CLASS(, ReorderingHelperFactory);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

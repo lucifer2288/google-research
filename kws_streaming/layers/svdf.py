@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
 # limitations under the License.
 
 """SVDF layer."""
-from kws_streaming.layers import depthwise_conv1d
 from kws_streaming.layers import modes
 from kws_streaming.layers import non_scaling_dropout
+from kws_streaming.layers import stream
 from kws_streaming.layers.compat import tf
 
 
@@ -47,6 +47,7 @@ class Svdf(tf.keras.layers.Layer):
                use_batch_norm=False,
                bn_scale=False,
                pad='causal',
+               state_name_tag='ExternalState_',
                **kwargs):
     super(Svdf, self).__init__(**kwargs)
 
@@ -71,6 +72,7 @@ class Svdf(tf.keras.layers.Layer):
     self.pad = pad
     self.use_batch_norm = use_batch_norm
     self.bn_scale = bn_scale
+    self.state_name_tag = state_name_tag
 
   def build(self, input_shape):
     super(Svdf, self).build(input_shape)
@@ -82,12 +84,17 @@ class Svdf(tf.keras.layers.Layer):
       self.dropout1 = tf.keras.layers.Lambda(lambda x, training: x)
     self.dense1 = tf.keras.layers.Dense(
         units=self.units1, use_bias=self.use_bias1)
-    self.depth_cnn1 = depthwise_conv1d.DepthwiseConv1D(
-        memory_size=self.memory_size,
+    self.depth_cnn1 = stream.Stream(
+        cell=tf.keras.layers.DepthwiseConv2D(
+            kernel_size=(self.memory_size, 1),
+            strides=(1, 1),
+            padding='valid',
+            dilation_rate=(1, 1),
+            use_bias=self.use_bias),
         inference_batch_size=self.inference_batch_size,
-        use_bias=self.use_bias,
         mode=self.mode,
-        pad=self.pad)
+        use_one_step=False,
+        pad_time_dim=self.pad)
     if self.units2 > 0:
       self.dense2 = tf.keras.layers.Dense(units=self.units2, use_bias=True)
     else:
@@ -111,13 +118,22 @@ class Svdf(tf.keras.layers.Layer):
     return output_shape
 
   def call(self, inputs, training=None):
-    output = self.dropout1(inputs, training=training)
-    output = self.dense1(output)
-    output = self.depth_cnn1(output)
-    output = self.batch_norm(output, training=training)
-    output = self.activation(output)
-    output = self.dense2(output)
-    return output
+    net = inputs
+
+    # add fake dim [batch, time, 1, feature]
+    net = tf.keras.backend.expand_dims(net, axis=2)
+
+    net = self.dropout1(net, training=training)
+    net = self.dense1(net)
+    net = self.depth_cnn1(net)
+    net = self.batch_norm(net, training=training)
+    net = self.activation(net)
+    net = self.dense2(net)
+
+    # [batch, time, feature]
+    net = tf.squeeze(net, [2])
+
+    return net
 
   def get_config(self):
     config = {
@@ -139,6 +155,7 @@ class Svdf(tf.keras.layers.Layer):
         'pad': self.pad,
         'use_batch_norm': self.use_batch_norm,
         'bn_scale': self.bn_scale,
+        'state_name_tag': self.state_name_tag,
     }
     base_config = super(Svdf, self).get_config()
     return dict(list(base_config.items()) + list(config.items()))

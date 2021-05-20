@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,13 @@
 
 
 #include "scann/tree_x_hybrid/tree_x_params.h"
+
+#include <cstdint>
+
 #include "scann/base/search_parameters.h"
 #include "scann/utils/types.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 TreeXOptionalParameters::TreeXOptionalParameters() {}
 TreeXOptionalParameters::~TreeXOptionalParameters() {}
@@ -41,33 +43,4 @@ Status TreeXOptionalParameters::EnablePreTokenization(
   return OkStatus();
 }
 
-Status TreeXOptionalParameters::EnablePreTokenization(
-    vector<int32_t> leaf_tokens_to_search,
-    vector<shared_ptr<const SearcherSpecificOptionalParameters>>
-        leaf_params_by_token) {
-  if (leaf_tokens_to_search.empty()) {
-    return InvalidArgumentError(
-        "leaf_tokens_to_search cannot be empty on calls to "
-        "EnablePreTokenization.");
-  }
-
-  if (pre_tokenization_enabled()) {
-    return FailedPreconditionError(
-        "Pre-tokenization cannot be enabled if it is already enabled.");
-  }
-
-  if (leaf_tokens_to_search.size() != leaf_params_by_token.size()) {
-    return InvalidArgumentError(
-        absl::StrCat("Size mismatch between leaf_tokens_to_search and "
-                     "leaf_params_by_token (",
-                     leaf_tokens_to_search.size(), " vs. ",
-                     leaf_params_by_token.size(), ")."));
-  }
-
-  leaf_tokens_to_search_ = std::move(leaf_tokens_to_search);
-  leaf_params_by_token_ = std::move(leaf_params_by_token);
-  return OkStatus();
-}
-
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -120,6 +120,12 @@ class DepthwiseConv1DTest(tu.TestBase):
       input_states_np = output_states_np
       for b in range(self.input_data.shape[0]):  # loop over batch
         self.assertAllClose(output_np[b][0], output_non_stream_np[b][i])
+
+    # validate name tag of model's state
+    expected_str = "ExternalState"
+    self.assertAllEqual(
+        expected_str,
+        model_stream.inputs[1].name.split("/")[-1][:len(expected_str)])
 
   def test_training(self):
     output_np, model = self._run_non_stream_model()

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ from ravens.models.conv_mlp import DeepConvMLP
 from ravens.models.gt_state import MlpModel
 from ravens.models.matching import Matching
 from ravens.models.regression import Regression
-from ravens.models.resnet import ResNet36_4s
-from ravens.models.resnet import ResNet43_8s
 from ravens.models.transport import Transport
+from ravens.models.transport_ablation import TransportPerPixelLoss
 from ravens.models.transport_goal import TransportGoal

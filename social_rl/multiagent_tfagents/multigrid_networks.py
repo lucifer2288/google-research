@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ from tf_agents.networks import value_rnn_network
 
 
 def one_hot_layer(class_dim=None):
-  """A Teras Sequential layer for making one-hot inputs."""
+  """A Keras Sequential layer for making one-hot inputs."""
   # Check if inputs were supplied correctly
   if class_dim is None:
     raise TypeError('class_dim is not set')
@@ -47,6 +47,7 @@ def one_hot_layer(class_dim=None):
 
 
 def cast_and_scale(scale_by=10.0):
+
   def _cast_and_scale(x):
     x = tf.keras.backend.cast(x, 'float32')
     return x / scale_by
@@ -54,12 +55,19 @@ def cast_and_scale(scale_by=10.0):
   return tf.keras.layers.Lambda(_cast_and_scale)
 
 
-def construct_multigrid_networks(observation_spec, action_spec, use_rnns=True,
+def construct_multigrid_networks(observation_spec,
+                                 action_spec,
+                                 use_rnns=True,
                                  actor_fc_layers=(200, 100),
-                                 value_fc_layers=(200, 100), lstm_size=(128,),
-                                 conv_filters=8, conv_kernel=3, scalar_fc=5,
-                                 scalar_name='direction', scalar_dim=4,
-                                 random_z=False, xy_dim=None):
+                                 value_fc_layers=(200, 100),
+                                 lstm_size=(128,),
+                                 conv_filters=8,
+                                 conv_kernel=3,
+                                 scalar_fc=5,
+                                 scalar_name='direction',
+                                 scalar_dim=4,
+                                 random_z=False,
+                                 xy_dim=None):
   """Creates an actor and critic network designed for use with MultiGrid.
 
   A convolution layer processes the image and a dense layer processes the
@@ -75,8 +83,8 @@ def construct_multigrid_networks(observation_spec, action_spec, use_rnns=True,
     lstm_size: Number of cells in each LSTM layers.
     conv_filters: Number of convolution filters.
     conv_kernel: Size of the convolution kernel.
-    scalar_fc: Number of neurons in the fully connected layer processing
-      the scalar input.
+    scalar_fc: Number of neurons in the fully connected layer processing the
+      scalar input.
     scalar_name: Name of the scalar input.
     scalar_dim: Highest possible value for the scalar input. Used to convert to
       one-hot representation.
@@ -91,14 +99,22 @@ def construct_multigrid_networks(observation_spec, action_spec, use_rnns=True,
     for the critic.
   """
   preprocessing_layers = {
-      'image': tf.keras.models.Sequential(
-          [cast_and_scale(),
-           tf.keras.layers.Conv2D(conv_filters, conv_kernel),
-           tf.keras.layers.Flatten()]),
-      scalar_name: tf.keras.models.Sequential(
-          [one_hot_layer(scalar_dim),
-           tf.keras.layers.Dense(scalar_fc)])
-      }
+      'image':
+          tf.keras.models.Sequential([
+              cast_and_scale(),
+              tf.keras.layers.Conv2D(conv_filters, conv_kernel),
+              tf.keras.layers.ReLU(),
+              tf.keras.layers.Flatten()
+          ]),
+  }
+  if scalar_name in observation_spec:
+    preprocessing_layers[scalar_name] = tf.keras.models.Sequential(
+        [one_hot_layer(scalar_dim),
+         tf.keras.layers.Dense(scalar_fc)])
+  if 'position' in observation_spec:
+    preprocessing_layers['position'] = tf.keras.models.Sequential(
+        [cast_and_scale(), tf.keras.layers.Dense(scalar_fc)])
+
   if random_z:
     preprocessing_layers['random_z'] = tf.keras.models.Sequential(
         [tf.keras.layers.Lambda(lambda x: x)])  # Identity layer
@@ -124,8 +140,7 @@ def construct_multigrid_networks(observation_spec, action_spec, use_rnns=True,
         preprocessing_layers=preprocessing_layers,
         preprocessing_combiner=preprocessing_combiner,
         input_fc_layer_params=value_fc_layers,
-        output_fc_layer_params=None,
-        lstm_size=lstm_size)
+        output_fc_layer_params=None)
   else:
     actor_net = actor_distribution_network.ActorDistributionNetwork(
         observation_spec,

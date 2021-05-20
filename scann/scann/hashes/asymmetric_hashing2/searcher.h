@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 
 
-#ifndef SCANN__HASHES_ASYMMETRIC_HASHING2_SEARCHER_H_
-#define SCANN__HASHES_ASYMMETRIC_HASHING2_SEARCHER_H_
+#ifndef SCANN_HASHES_ASYMMETRIC_HASHING2_SEARCHER_H_
+#define SCANN_HASHES_ASYMMETRIC_HASHING2_SEARCHER_H_
 
+#include <cstdint>
 #include <utility>
 
 #include "scann/base/search_parameters.h"
@@ -34,8 +35,7 @@
 #include "scann/utils/util_functions.h"
 #include "tensorflow/core/platform/macros.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 class TreeAHHybridResidual;
 
@@ -44,7 +44,9 @@ namespace asymmetric_hashing2 {
 template <typename T>
 class SearcherOptions {
  public:
-  SearcherOptions() {}
+  explicit SearcherOptions(shared_ptr<const AsymmetricQueryer<T>> queryer,
+                           shared_ptr<const Indexer<T>> indexer = nullptr)
+      : asymmetric_queryer_(std::move(queryer)), indexer_(std::move(indexer)) {}
 
   void set_asymmetric_lookup_type(
       AsymmetricHasherConfig::LookupType lookup_type) {
@@ -59,25 +61,9 @@ class SearcherOptions {
   size_t num_blocks() const {
     if (asymmetric_queryer_) {
       return asymmetric_queryer_->num_blocks();
-    } else if (symmetric_queryer_) {
-      return symmetric_queryer_->num_blocks();
     } else {
       return 0;
     }
-  }
-
-  void EnableAsymmetricQuerying(
-      shared_ptr<const AsymmetricQueryer<T>> queryer,
-      shared_ptr<const Indexer<T>> indexer = nullptr) {
-    asymmetric_queryer_ = std::move(queryer);
-    indexer_ = std::move(indexer);
-  }
-
-  void EnableSymmetricQuerying(shared_ptr<const SymmetricQueryer<T>> queryer,
-                               shared_ptr<const Indexer<T>> indexer) {
-    symmetric_queryer_ = std::move(queryer);
-    indexer_ = std::move(indexer);
-    asymmetric_queryer_ = nullptr;
   }
 
   using FixedPointLUTConversionOptions =
@@ -91,8 +77,6 @@ class SearcherOptions {
   void set_noise_shaping_threshold(double t) { noise_shaping_threshold_ = t; }
 
  private:
-  shared_ptr<const SymmetricQueryer<T>> symmetric_queryer_ = nullptr;
-
   shared_ptr<const AsymmetricQueryer<T>> asymmetric_queryer_ = nullptr;
 
   shared_ptr<const Indexer<T>> indexer_ = nullptr;
@@ -128,8 +112,6 @@ class Searcher final : public SingleMachineSearcherBase<T> {
     return optimal_low_level_batch_size_;
   }
 
-  using MutationMetadata = UntypedSingleMachineSearcherBase::MutationMetadata;
-
   StatusOr<SingleMachineFactoryOptions> ExtractSingleMachineFactoryOptions()
       override;
 
@@ -164,11 +146,6 @@ class Searcher final : public SingleMachineSearcherBase<T> {
                                      PostprocessFunctor postprocessing_functor,
                                      NNResultsVector* result) const;
 
-  template <typename PostprocessFunctor, typename TopN>
-  Status FindNeighborsQueryerDispatcher(
-      const DatapointPtr<T>& query, const SearchParameters& params,
-      PostprocessFunctor postprocessing_functor, TopN* result) const;
-
   template <typename PostprocessFunctor>
   Status FindNeighborsBatchedInternal(
       std::function<DatapointPtr<T>(DatapointIndex)> get_query,
@@ -200,9 +177,7 @@ class Searcher final : public SingleMachineSearcherBase<T> {
 
   size_t optimal_low_level_batch_size_ = 1;
 
-  mutable unique_ptr<typename Searcher<T>::Mutator> mutator_ = nullptr;
-
-  friend class ::tensorflow::scann_ops::TreeAHHybridResidual;
+  friend class ::research_scann::TreeAHHybridResidual;
 
   TF_DISALLOW_COPY_AND_ASSIGN(Searcher);
 };
@@ -266,7 +241,6 @@ SCANN_INSTANTIATE_TYPED_CLASS(extern, Searcher);
 SCANN_INSTANTIATE_TYPED_CLASS(extern, PrecomputedAsymmetricLookupTableCreator);
 
 }  // namespace asymmetric_hashing2
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

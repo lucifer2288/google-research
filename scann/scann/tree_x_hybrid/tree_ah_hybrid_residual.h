@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 
 
-#ifndef SCANN__TREE_X_HYBRID_TREE_AH_HYBRID_RESIDUAL_H_
-#define SCANN__TREE_X_HYBRID_TREE_AH_HYBRID_RESIDUAL_H_
+#ifndef SCANN_TREE_X_HYBRID_TREE_AH_HYBRID_RESIDUAL_H_
+#define SCANN_TREE_X_HYBRID_TREE_AH_HYBRID_RESIDUAL_H_
 
+#include <cstdint>
 #include <functional>
 
 #include "scann/base/search_parameters.h"
@@ -31,8 +32,7 @@
 #include "scann/trees/kmeans_tree/kmeans_tree.h"
 #include "scann/utils/types.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 class TreeAHHybridResidual final : public SingleMachineSearcherBase<float> {
  public:
@@ -48,8 +48,7 @@ class TreeAHHybridResidual final : public SingleMachineSearcherBase<float> {
       unique_ptr<KMeansTreeLikePartitioner<float>> partitioner,
       shared_ptr<const asymmetric_hashing2::Model<float>> ah_model,
       vector<std::vector<DatapointIndex>> datapoints_by_token,
-      const DenseDataset<uint8_t>* hashed_dataset,
-      thread::ThreadPool* pool = nullptr);
+      const DenseDataset<uint8_t>* hashed_dataset, ThreadPool* pool = nullptr);
 
   void set_database_tokenizer(
       shared_ptr<const KMeansTreeLikePartitioner<float>> database_tokenizer) {
@@ -72,8 +71,9 @@ class TreeAHHybridResidual final : public SingleMachineSearcherBase<float> {
   static StatusOr<uint8_t> ComputeGlobalTopNShift(
       ConstSpan<std::vector<DatapointIndex>> datapoints_by_token);
 
-  StatusOr<unique_ptr<SearchParameters::UnlockedQueryPreprocessingResults>>
-  UnlockedPreprocessQuery(const DatapointPtr<float>& query) const final;
+  Status PreprocessQueryIntoParamsUnlocked(
+      const DatapointPtr<float>& query,
+      SearchParameters& search_params) const final;
 
   StatusOr<SingleMachineFactoryOptions> ExtractSingleMachineFactoryOptions()
       override;
@@ -97,6 +97,7 @@ class TreeAHHybridResidual final : public SingleMachineSearcherBase<float> {
 
   Status EnableCrowdingImpl(
       ConstSpan<int64_t> datapoint_index_to_crowding_attribute) final;
+  void DisableCrowdingImpl() final;
 
  private:
   class UnlockedTreeAHHybridResidualPreprocessingResults
@@ -160,8 +161,6 @@ class TreeAHHybridResidual final : public SingleMachineSearcherBase<float> {
 
   DatapointIndex num_datapoints_ = 0;
 
-  vector<float> ah_variance_adjustment_by_token_;
-
   vector<uint32_t> leaf_tokens_by_norm_;
 
   AsymmetricHasherConfig::LookupType lookup_type_tag_ =
@@ -172,9 +171,10 @@ class TreeAHHybridResidual final : public SingleMachineSearcherBase<float> {
   bool enable_global_topn_ = false;
 
   uint8_t global_topn_shift_ = 0;
+
+  FRIEND_TEST(TreeAHHybridResidualTest, CrowdingMutation);
 };
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

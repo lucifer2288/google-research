@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -62,7 +62,6 @@ def normalize_probs(samples, smoothing=1e-8):
   return new_samples
 
 
-# pylint: disable=old-style-class
 @six.add_metaclass(abc.ABCMeta)
 class ReplayBuffer():
 
@@ -73,9 +72,6 @@ class ReplayBuffer():
   @abc.abstractmethod
   def replay(self, envs):
     raise NotImplementedError
-
-
-# pylint: enable=old-style-class
 
 
 class AllGoodReplayBuffer(ReplayBuffer):

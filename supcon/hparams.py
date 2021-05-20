@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ class ContrastiveLoss:
   denominator_mode = hparam.field(
       default=enums.LossDenominatorMode.ALL, abbrev='dm')
   positives_cap = hparam.field(default=-1, abbrev='pc')
+  scale_by_temperature = hparam.field(default=True, abbrev='sbt')
 
 
 @hparam.s

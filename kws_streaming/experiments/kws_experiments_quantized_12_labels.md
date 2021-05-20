@@ -2,7 +2,7 @@
 ======================================================================================
 
 To enable post training model quantization, we uses \
---feature_type 'mfcc_op' which is numerically different with 'mfcc_tf' (the last one was used in [paper](https://arxiv.org/abs/2005.06720)). We did not run hyperparameters optimization with 'mfcc_op' feature extractor, so there can be some accuracy reduction.
+--feature_type 'mfcc_op' which is numerically different with 'mfcc_tf' (the last one was used in [paper](https://arxiv.org/abs/2005.06720)). We did not run hyperparameters optimization with 'mfcc_op' feature extractor, so there can be some accuracy reduction. mfcc_op calls audio_spectrogram() and mfcc(). The last one expects squared fft magnitude, so we set fft_magnitude_squared 1.
 
 All below models are trained with \
 --feature_type 'mfcc_op' (speech mfcc feature extractor is using internal TFLite op ) and \
@@ -39,6 +39,7 @@ source ./venv3/bin/activate
 pip install --upgrade pip
 pip install tf_nightly==2.4.0-dev20200917
 pip install tensorflow_addons
+pip install tensorflow_model_optimization
 # was tested on tf_nightly-2.3.0.dev20200515-cp36-cp36m-manylinux2010_x86_64.whl
 
 # install libs:
@@ -68,13 +69,11 @@ cd ../
 DATA_PATH=$KWS_PATH/data2
 ```
 
-
-## Set pre trained models:
+## Set path to models:
 
 ```shell
-# download and set up path to models trained and evaluated on data sets V2
-wget https://storage.googleapis.com/kws_models/models2_q.zip
-unzip ./models2_q.zip
+# set up path for model training
+mkdir $KWS_PATH/models2_q
 
 # models trained on data V2
 MODELS_PATH=$KWS_PATH/models2_q
@@ -130,7 +129,7 @@ adb shell chmod +x /data/local/tmp/benchmark_model_plus_flex
 
 ## Models training and evaluation:
 
-Now we can run below commands with "--train 0" which will evaluate the model and produce accuracy report with TFLite modules. If you would like to re-train model from scratch then you should: set "--train 0" and remove model subfolder inside of $MODELS_PATH
+If your model is already trained then you can specify "--train 0" which will evaluate the model and produce an accuracy report with TFLite modules. If you would like to re-train model from scratch then you should: set "--train 1" and remove model subfolder inside of $MODELS_PATH
 
 There are two options of running python script. One with bazel and another by calling python directly shown below:
 ```shell
@@ -151,7 +150,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/svdf/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -161,8 +160,9 @@ $CMD_TRAIN \
 --resample 0.15 \
 --alsologtostderr \
 --time_shift_ms 100 \
---train 0 \
+--train 1 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 svdf \
 --svdf_memory_size 4,10,10,10,10,10 \
 --svdf_units1 256,256,256,256,256,256 \
@@ -186,7 +186,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/lstm_peep/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -195,7 +195,7 @@ $CMD_TRAIN \
 --dct_num_features 20 \
 --resample 0.15 \
 --alsologtostderr \
---train 0 \
+--train 1 \
 --lr_schedule 'exp' \
 --use_spec_augment 1 \
 --time_masks_number 2 \
@@ -203,6 +203,7 @@ $CMD_TRAIN \
 --frequency_masks_number 2 \
 --frequency_mask_max_size 5 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 lstm \
 --lstm_units 500 \
 --return_sequences 0 \
@@ -225,7 +226,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/crnn/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -234,7 +235,7 @@ $CMD_TRAIN \
 --dct_num_features 20 \
 --resample 0.15 \
 --alsologtostderr \
---train 0 \
+--train 1 \
 --lr_schedule 'exp' \
 --use_spec_augment 1 \
 --time_masks_number 2 \
@@ -242,6 +243,7 @@ $CMD_TRAIN \
 --frequency_masks_number 2 \
 --frequency_mask_max_size 5 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 crnn \
 --cnn_filters '16,16' \
 --cnn_kernel_size '(3,3),(5,3)' \
@@ -269,7 +271,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/crnn_state/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -278,7 +280,7 @@ $CMD_TRAIN \
 --dct_num_features 20 \
 --resample 0.15 \
 --alsologtostderr \
---train 0 \
+--train 1 \
 --lr_schedule 'exp' \
 --use_spec_augment 1 \
 --time_masks_number 2 \
@@ -286,6 +288,7 @@ $CMD_TRAIN \
 --frequency_masks_number 2 \
 --frequency_mask_max_size 5 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 crnn \
 --cnn_filters '16,16' \
 --cnn_kernel_size '(3,3),(5,3)' \
@@ -311,7 +314,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/dnn/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -320,7 +323,7 @@ $CMD_TRAIN \
 --dct_num_features 20 \
 --resample 0.15 \
 --alsologtostderr \
---train 0 \
+--train 1 \
 --lr_schedule 'exp' \
 --use_spec_augment 1 \
 --time_masks_number 2 \
@@ -328,6 +331,7 @@ $CMD_TRAIN \
 --frequency_masks_number 2 \
 --frequency_mask_max_size 5 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 dnn \
 --units1 '64,128' \
 --act1 "'relu','relu'" \
@@ -359,7 +363,7 @@ $CMD_TRAIN \
 --dct_num_features 20 \
 --resample 0.15 \
 --alsologtostderr \
---train 0 \
+--train 1 \
 --lr_schedule 'exp' \
 --use_spec_augment 1 \
 --time_masks_number 2 \
@@ -367,6 +371,7 @@ $CMD_TRAIN \
 --frequency_masks_number 2 \
 --frequency_mask_max_size 5 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 att_mh_rnn \
 --cnn_filters '10,1' \
 --cnn_kernel_size '(5,1),(5,1)' \

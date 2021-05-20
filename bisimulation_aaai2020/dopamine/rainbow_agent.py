@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -259,6 +259,13 @@ class BisimulationRainbowAgent(rainbow_agent.RainbowAgent):
 
   def _sync_qt_ops(self):
     return tf.no_op()
+
+  def _network_template(self, state):
+    return self.network(self.num_actions, self._num_atoms, self._support,
+                        self._get_network_type(), state)
+
+  def _create_network(self, name):
+    return tf.make_template('Online', self._network_template)
 
   def _build_networks(self):
     super(BisimulationRainbowAgent, self)._build_networks()

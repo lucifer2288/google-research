@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -80,6 +80,12 @@ flags.DEFINE_bool(
     'delete_audio_from_output', True,
     'If true, remove audio from the output table. Can be '
     'helpful in keeping output tables small.')
+flags.DEFINE_bool(
+    'split_embeddings_into_separate_tables', False,
+    'If true, write each embedding to a separate table.')
+flags.DEFINE_bool(
+    'use_frontend_fn', False,
+    'If `true`, call frontend fn on audio before passing to the model.')
 flags.DEFINE_bool('debug', False, 'If True, run in debug model.')
 
 FLAGS = flags.FLAGS
@@ -125,6 +131,8 @@ def main(unused_argv):
           FLAGS.average_over_time,
           FLAGS.delete_audio_from_output,
           output_filename,
+          split_embeddings_into_separate_tables=FLAGS.split_embeddings_into_separate_tables,  # pylint:disable=line-too-long
+          use_frontend_fn=FLAGS.use_frontend_fn,
           input_format=input_format,
           output_format=output_format,
           suffix=i)

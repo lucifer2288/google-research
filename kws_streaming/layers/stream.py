@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@
 """Wrapper for streaming inference."""
 
 from absl import logging
+from kws_streaming.layers import average_pooling2d
 from kws_streaming.layers import modes
 from kws_streaming.layers.compat import tf
+from tensorflow_model_optimization.python.core.quantization.keras import quantize_wrapper
 
 
 class Stream(tf.keras.layers.Layer):
@@ -70,9 +72,9 @@ class Stream(tf.keras.layers.Layer):
                state_shape=None,
                ring_buffer_size_in_time_dim=None,
                use_one_step=True,
+               state_name_tag='ExternalState',
                **kwargs):
     super(Stream, self).__init__(**kwargs)
-
     self.cell = cell
     self.inference_batch_size = inference_batch_size
     self.mode = mode
@@ -80,10 +82,15 @@ class Stream(tf.keras.layers.Layer):
     self.state_shape = state_shape
     self.ring_buffer_size_in_time_dim = ring_buffer_size_in_time_dim
     self.use_one_step = use_one_step
+    self.state_name_tag = state_name_tag
+    self.stride = 1
+
+    wrappped_cell = self.get_core_layer()
 
     if not use_one_step and isinstance(
-        self.cell, (tf.keras.layers.Flatten, tf.keras.layers.GlobalMaxPooling2D,
-                    tf.keras.layers.GlobalAveragePooling2D)):
+        wrappped_cell,
+        (tf.keras.layers.Flatten, tf.keras.layers.GlobalMaxPooling2D,
+         tf.keras.layers.GlobalAveragePooling2D)):
       raise ValueError('Flatten, GlobalMaxPooling2D, GlobalAveragePooling2D '
                        'can be used only with use_one_step = True '
                        'because they are executed one time per inference call '
@@ -91,20 +98,22 @@ class Stream(tf.keras.layers.Layer):
                        'can produce multiple outputs in time dim, '
                        'so conv can be used with use_one_step = False or True')
 
-    if self.ring_buffer_size_in_time_dim:
+    if self.ring_buffer_size_in_time_dim is not None:
       # it is a special case when ring_buffer_size_in_time_dim is specified
       # outside of the layer in this case we just build a ring buffer
       # and do not check what is the type of the cell
       pass
     elif isinstance(
-        cell, (tf.keras.layers.Conv1D, tf.keras.layers.Conv2D,
-               tf.keras.layers.DepthwiseConv2D, tf.keras.layers.SeparableConv2D,
-               tf.keras.layers.SeparableConv1D)):
+        wrappped_cell,
+        (tf.keras.layers.Conv1D, tf.keras.layers.Conv2D,
+         tf.keras.layers.DepthwiseConv2D, tf.keras.layers.SeparableConv2D,
+         tf.keras.layers.SeparableConv1D, average_pooling2d.AveragePooling2D)):
+      padding = wrappped_cell.get_config()['padding']
+      strides = wrappped_cell.get_config()['strides']
+      self.stride = strides[0]
 
       if self.mode not in (modes.Modes.TRAINING,
                            modes.Modes.NON_STREAM_INFERENCE):
-        padding = cell.get_config()['padding']
-        strides = cell.get_config()['strides']
         if padding != 'valid':
           raise ValueError('conv/cell padding has to be valid,'
                            'padding has to be set by pad_time_dim')
@@ -115,20 +124,26 @@ class Stream(tf.keras.layers.Layer):
                              'in streaming mode with use_one_step=True'
                              ' is not supported, set use_one_step=False')
 
-      dilation_rate = cell.get_config()['dilation_rate']
-      kernel_size = cell.get_config()['kernel_size']
+      dilation_rate = wrappped_cell.get_config()['dilation_rate']
+      kernel_size = wrappped_cell.get_config()['kernel_size']
       if self.use_one_step:
         # effective kernel size in time dimension
         self.ring_buffer_size_in_time_dim = dilation_rate[0] * (kernel_size[0] -
                                                                 1) + 1
       else:
-        # streaming of strided or 1 step conv
-        self.ring_buffer_size_in_time_dim = dilation_rate[0] * (
-            kernel_size[0] - 1)
+        # Streaming of strided or 1 step conv.
+        # Assuming input length is a multiple of strides (otherwise streaming
+        # conv is not meaningful), setting to this value (instead of
+        # dilation_rate[0] * (kernel_size[0] - 1)) ensures that we do not
+        # ignore the `strides - 1` rightmost (and hence most recent) valid
+        # input samples.
+        self.ring_buffer_size_in_time_dim = max(
+            0, dilation_rate[0] * (kernel_size[0] - 1) - (strides[0] - 1))
 
-    elif isinstance(self.cell, tf.keras.layers.AveragePooling2D):
-      strides = cell.get_config()['strides']
-      pool_size = cell.get_config()['pool_size']
+    elif isinstance(wrappped_cell, tf.keras.layers.AveragePooling2D):
+      strides = wrappped_cell.get_config()['strides']
+      pool_size = wrappped_cell.get_config()['pool_size']
+      self.stride = strides[0]
       if self.mode not in (
           modes.Modes.TRAINING,
           modes.Modes.NON_STREAM_INFERENCE) and strides[0] != pool_size[0]:
@@ -138,22 +153,36 @@ class Stream(tf.keras.layers.Layer):
       self.ring_buffer_size_in_time_dim = pool_size[0]
 
     elif isinstance(
-        self.cell, (tf.keras.layers.Flatten, tf.keras.layers.GlobalMaxPooling2D,
-                    tf.keras.layers.GlobalAveragePooling2D)):
+        wrappped_cell,
+        (tf.keras.layers.Flatten, tf.keras.layers.GlobalMaxPooling2D,
+         tf.keras.layers.GlobalAveragePooling2D)):
       # effective kernel size in time dimension
       if self.state_shape:
         self.ring_buffer_size_in_time_dim = self.state_shape[1]
 
     else:
-      raise ValueError('Cell is not supported ', cell)
+      raise ValueError('Cell is not supported ', wrappped_cell)
 
     if self.ring_buffer_size_in_time_dim == 1:
-      logging.warn('There is no need to use Stream on time dim with size 1')
+      logging.warning('There is no need to use Stream on time dim with size 1')
+
+  def get_core_layer(self):
+    """Get core layer which can be wrapped by quantizer."""
+    core_layer = self.cell
+    if isinstance(core_layer, quantize_wrapper.QuantizeWrapper):
+      core_layer = core_layer.layer
+    return core_layer
+
+  def stride(self):
+    return self.stride
 
   def build(self, input_shape):
     super(Stream, self).build(input_shape)
+
+    wrappped_cell = self.get_core_layer()
+
     if isinstance(
-        self.cell,
+        wrappped_cell,
         (tf.keras.layers.Conv1D, tf.keras.layers.Conv2D,
          tf.keras.layers.DepthwiseConv2D, tf.keras.layers.AveragePooling2D,
          tf.keras.layers.SeparableConv2D, tf.keras.layers.SeparableConv1D)):
@@ -162,7 +191,7 @@ class Stream(tf.keras.layers.Layer):
           self.inference_batch_size, self.ring_buffer_size_in_time_dim
       ] + input_shape.as_list()[2:]
     elif isinstance(
-        self.cell,
+        wrappped_cell,
         (tf.keras.layers.Flatten, tf.keras.layers.GlobalMaxPooling2D,
          tf.keras.layers.GlobalAveragePooling2D)) and not self.state_shape:
       if self.mode in (modes.Modes.TRAINING, modes.Modes.NON_STREAM_INFERENCE):
@@ -200,7 +229,8 @@ class Stream(tf.keras.layers.Layer):
         self.input_state = tf.keras.layers.Input(
             shape=self.state_shape[1:],
             batch_size=self.inference_batch_size,
-            name=self.name + '/input_state')  # adding names to make it unique
+            name=self.name + '/' +
+            self.state_name_tag)  # adding names to make it unique
       else:
         self.input_state = None
       self.output_state = None
@@ -210,12 +240,15 @@ class Stream(tf.keras.layers.Layer):
       return self._streaming_internal_state(inputs)
 
     elif self.mode == modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE:
-      # in streaming inference mode with external state
-      # in addition to the output we return the output state.
-      output, self.output_state = self._streaming_external_state(
-          inputs, self.input_state)
+      if self.ring_buffer_size_in_time_dim:
+        # in streaming inference mode with external state
+        # in addition to the output we return the output state.
+        output, self.output_state = self._streaming_external_state(
+            inputs, self.input_state)
+      else:
+        # if there is no ring buffer then the input_state isn't needed.
+        output = self.cell(inputs)
       return output
-
     elif self.mode in (modes.Modes.TRAINING, modes.Modes.NON_STREAM_INFERENCE):
       # run non streamable training or non streamable inference
       return self._non_streaming(inputs)
@@ -229,10 +262,11 @@ class Stream(tf.keras.layers.Layer):
         'inference_batch_size': self.inference_batch_size,
         'mode': self.mode,
         'pad_time_dim': self.pad_time_dim,
-        'cell': self.cell,
         'state_shape': self.state_shape,
         'ring_buffer_size_in_time_dim': self.ring_buffer_size_in_time_dim,
         'use_one_step': self.use_one_step,
+        'state_name_tag': self.state_name_tag,
+        'cell': self.cell,
     })
     return config
 
@@ -280,7 +314,7 @@ class Stream(tf.keras.layers.Layer):
         with tf.control_dependencies([assign_states]):
           return self.cell(memory)
       else:
-        return inputs
+        return self.cell(inputs)
 
   def _streaming_external_state(self, inputs, state):
     state = [] if state is None else state
@@ -299,15 +333,12 @@ class Stream(tf.keras.layers.Layer):
       return output, memory
     else:
       # add new row [batch_size, memory_size, feature_dim, channel]
-      if self.ring_buffer_size_in_time_dim:
-        memory = tf.keras.backend.concatenate([state, inputs], 1)
+      memory = tf.keras.backend.concatenate([state, inputs], 1)
 
-        state_update = memory[:, -self.ring_buffer_size_in_time_dim:, :]  # pylint: disable=invalid-unary-operand-type
+      state_update = memory[:, -self.ring_buffer_size_in_time_dim:, :]  # pylint: disable=invalid-unary-operand-type
 
-        output = self.cell(memory)
-        return output, state_update
-      else:
-        return inputs, []
+      output = self.cell(memory)
+      return output, state_update
 
   def _non_streaming(self, inputs):
     # Pad inputs in time dim: causal or same
@@ -320,14 +351,15 @@ class Stream(tf.keras.layers.Layer):
 
       # temporal padding
       pad = [[0, 0]] * inputs.shape.rank
+      if self.use_one_step:
+        pad_total_amount = self.ring_buffer_size_in_time_dim - 1
+      else:
+        pad_total_amount = self.ring_buffer_size_in_time_dim
       if self.pad_time_dim == 'causal':
-        if self.use_one_step:
-          pad[1] = [self.ring_buffer_size_in_time_dim - 1, 0]
-        else:
-          pad[1] = [self.ring_buffer_size_in_time_dim, 0]
+        pad[1] = [pad_total_amount, 0]
       elif self.pad_time_dim == 'same':
-        half = self.ring_buffer_size_in_time_dim // 2
-        pad[1] = [half, half]
+        half = pad_total_amount // 2
+        pad[1] = [half, pad_total_amount - half]
       inputs = tf.pad(inputs, pad, 'constant')
 
     return self.cell(inputs)

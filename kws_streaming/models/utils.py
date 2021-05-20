@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,11 +15,8 @@
 
 # Lint as: python3
 """Utility functions for operations on Model."""
-
-import ast
 import os.path
 from typing import Sequence
-
 from kws_streaming.layers import modes
 from kws_streaming.layers.compat import tf
 from kws_streaming.layers.compat import tf1
@@ -27,43 +24,10 @@ from kws_streaming.models import model_flags
 from kws_streaming.models import model_params
 from kws_streaming.models import models as kws_models
 # pylint: disable=g-direct-tensorflow-import
-from tensorflow.python.keras import models
+from tensorflow.python.keras import models as models_utils
 from tensorflow.python.keras.engine import functional
 # pylint: enable=g-direct-tensorflow-import
-
-
-def conv2d_bn(x,
-              filters,
-              kernel_size,
-              padding='same',
-              strides=(1, 1),
-              activation='relu',
-              use_bias=False,
-              scale=False):
-  """Utility function to apply conv + BN.
-
-  Arguments:
-    x: input tensor.
-    filters: filters in `Conv2D`.
-    kernel_size: size of convolution kernel.
-    padding: padding mode in `Conv2D`.
-    strides: strides in `Conv2D`.
-    activation: activation function applied in the end.
-    use_bias: use bias for convolution.
-    scale: scale batch normalization.
-
-  Returns:
-    Output tensor after applying `Conv2D` and `BatchNormalization`.
-  """
-
-  x = tf.keras.layers.Conv2D(
-      filters, kernel_size,
-      strides=strides,
-      padding=padding,
-      use_bias=use_bias)(x)
-  x = tf.keras.layers.BatchNormalization(scale=scale)(x)
-  x = tf.keras.layers.Activation(activation)(x)
-  return x
+from tensorflow_model_optimization.python.core.quantization.keras import quantize
 
 
 def save_model_summary(model, path, file_name='model_summary.txt'):
@@ -105,8 +69,12 @@ def _get_input_output_states(model):
     config = model.layers[i].get_config()
     # input output states exist only in layers with property 'mode'
     if 'mode' in config:
-      input_states.append(model.layers[i].get_input_state())
-      output_states.append(model.layers[i].get_output_state())
+      input_state = model.layers[i].get_input_state()
+      if input_state not in ([], [None]):
+        input_states.append(model.layers[i].get_input_state())
+      output_state = model.layers[i].get_output_state()
+      if output_state not in ([], [None]):
+        output_states.append(output_state)
   return input_states, output_states
 
 
@@ -124,8 +92,8 @@ def _clone_model(model, input_tensors):
       newly_created_input_layer = input_tensor._keras_history.layer
       new_input_layers[original_input_layer] = newly_created_input_layer
 
-  model_config, created_layers = models._clone_layers_and_model_config(
-      model, new_input_layers, models._clone_layer)
+  model_config, created_layers = models_utils._clone_layers_and_model_config(
+      model, new_input_layers, models_utils._clone_layer)
   # pylint: enable=protected-access
 
   # Reconstruct model from the config, using the cloned layers.
@@ -302,8 +270,10 @@ def to_streaming_inference(model_non_stream, flags, mode):
       tf.keras.layers.Input(
           shape=input_data_shape, batch_size=1, name='input_audio')
   ]
-  model_inference = convert_to_inference_model(model_non_stream, input_tensors,
-                                               mode)
+  quantize_stream_scope = quantize.quantize_scope()
+  with quantize_stream_scope:
+    model_inference = convert_to_inference_model(model_non_stream,
+                                                 input_tensors, mode)
   return model_inference
 
 
@@ -312,7 +282,10 @@ def model_to_tflite(sess,
                     flags,
                     mode=modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE,
                     save_model_path=None,
-                    optimizations=None):
+                    optimizations=None,
+                    inference_type=tf1.lite.constants.FLOAT,
+                    experimental_new_quantizer=True,
+                    representative_dataset=None):
   """Convert non streaming model to tflite inference model.
 
   In this case inference graph will be stateless.
@@ -327,6 +300,10 @@ def model_to_tflite(sess,
       streaming
     save_model_path: path to save intermediate model summary
     optimizations: list of optimization options
+    inference_type: inference type, can be float or int8
+    experimental_new_quantizer: enable new quantizer
+    representative_dataset: function generating representative data sets
+      for calibation post training quantizer
 
   Returns:
     tflite model
@@ -344,10 +321,15 @@ def model_to_tflite(sess,
   # convert Keras inference model to tflite inference model
   converter = tf1.lite.TFLiteConverter.from_session(
       sess, model_stateless_stream.inputs, model_stateless_stream.outputs)
-  converter.inference_type = tf1.lite.constants.FLOAT
+  converter.inference_type = inference_type
+  converter.experimental_new_quantizer = experimental_new_quantizer
+  if representative_dataset is not None:
+    converter.representative_dataset = representative_dataset
 
   # this will enable audio_spectrogram and mfcc in TFLite
-  converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+  converter.target_spec.supported_ops = [
+      tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS
+  ]
   converter.allow_custom_ops = True
   if optimizations:
     converter.optimizations = optimizations
@@ -392,24 +374,6 @@ def model_to_saved(model_non_stream,
   model.save(save_model_path, include_optimizer=False, save_format='tf')
 
 
-def parse(text):
-  """Parse model parameters.
-
-  Args:
-    text: string with layer parameters: '128,128' or "'relu','relu'".
-
-  Returns:
-    list of parsed parameters
-  """
-  if not text:
-    return []
-  res = ast.literal_eval(text)
-  if isinstance(res, tuple):
-    return res
-  else:
-    return [res]
-
-
 def next_power_of_two(x):
   """Calculates the smallest enclosing power of two for an input.
 
@@ -429,8 +393,31 @@ def get_model_with_default_params(model_name, mode=None):
         "Expected 'model_name' to be one of "
         f"{model_params.HOTWORD_MODEL_PARAMS.keys} but got '{model_name}'.")
   params = model_params.HOTWORD_MODEL_PARAMS[model_name]
+  data_stride = params.data_stride
   params = model_flags.update_flags(params)
+  params.data_stride = data_stride
   model = kws_models.MODELS[params.model_name](params)
+  model.summary()
   if mode is not None:
     model = to_streaming_inference(model, flags=params, mode=mode)
   return model
+
+
+def traverse_graph(prev_layer, layers):
+  """Traverse keras sequential graph."""
+  for layer in layers:
+    if isinstance(layer, (tf.keras.Sequential, tf.keras.Model)):
+      prev_layer = traverse_graph(prev_layer, layer.layers)
+    else:
+      prev_layer = layer(prev_layer)
+  return prev_layer
+
+
+def sequential_to_functional(model):
+  """Converts keras sequential model to functional one."""
+  input_layer = tf.keras.Input(
+      batch_input_shape=model.layers[0].input_shape[0])
+  prev_layer = input_layer
+  prev_layer = traverse_graph(prev_layer, model.layers[1:])
+  func_model = tf.keras.Model([input_layer], [prev_layer])
+  return func_model

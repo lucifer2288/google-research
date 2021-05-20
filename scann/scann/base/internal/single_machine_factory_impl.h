@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 
 
-#ifndef SCANN__BASE_INTERNAL_SINGLE_MACHINE_FACTORY_IMPL_H_
-#define SCANN__BASE_INTERNAL_SINGLE_MACHINE_FACTORY_IMPL_H_
+#ifndef SCANN_BASE_INTERNAL_SINGLE_MACHINE_FACTORY_IMPL_H_
+#define SCANN_BASE_INTERNAL_SINGLE_MACHINE_FACTORY_IMPL_H_
 
 #include <memory>
 
@@ -29,8 +29,7 @@
 #include "scann/utils/scann_config_utils.h"
 #include "tensorflow/core/lib/core/errors.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 class DenseDataset;
@@ -76,12 +75,6 @@ class SingleMachineFactoryImplClass {
     typed_searcher->EnableReordering(std::move(reordering_helper),
                                      params.post_reordering_num_neighbors,
                                      params.post_reordering_epsilon);
-    if (config.has_compressed_reordering()) {
-      DCHECK(!typed_searcher->needs_dataset());
-      typed_searcher->ReleaseDatasetAndDocids();
-      typed_searcher->set_compressed_dataset(opts->compressed_dataset);
-    }
-
     return {std::move(searcher)};
   }
 };
@@ -130,7 +123,6 @@ StatusOrSearcherUntyped SingleMachineFactoryUntypedImpl(
 }
 
 }  // namespace internal
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

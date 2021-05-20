@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,15 +17,16 @@
 #include <functional>
 #include <iostream>
 
-#include "definitions.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/container/node_hash_set.h"
+#include "definitions.h"
 
 namespace automl_zero {
 
 using ::std::function;  // NOLINT;
 using ::std::pair;  // NOLINT;
-using ::std::unordered_set;  // NOLINT;
+// NOLINT;
 using ::testing::Pair;
 using ::testing::UnorderedElementsAre;
 

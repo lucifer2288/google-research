@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,14 @@
 #include "scann/tree_x_hybrid/tree_ah_hybrid_residual.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <numeric>
 #include <unordered_set>
 
 #include "absl/flags/flag.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "scann/base/search_parameters.h"
 #include "scann/base/single_machine_base.h"
 #include "scann/distance_measures/distance_measure_factory.h"
@@ -31,22 +35,18 @@
 #include "scann/hashes/asymmetric_hashing2/training.h"
 #include "scann/hashes/asymmetric_hashing2/training_options.h"
 #include "scann/oss_wrappers/scann_down_cast.h"
+#include "scann/oss_wrappers/scann_status_builder.h"
 #include "scann/projection/projection_factory.h"
 #include "scann/proto/centers.pb.h"
 #include "scann/proto/distance_measure.pb.h"
+#include "scann/tree_x_hybrid/internal/batching.h"
 #include "scann/tree_x_hybrid/internal/utils.h"
 #include "scann/tree_x_hybrid/tree_x_params.h"
-
-#include "absl/synchronization/mutex.h"
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
-#include "scann/oss_wrappers/scann_status_builder.h"
 #include "scann/utils/fast_top_neighbors.h"
 #include "scann/utils/types.h"
 #include "tensorflow/core/lib/core/errors.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 using asymmetric_hashing2::AsymmetricHashingOptionalParameters;
 
@@ -72,6 +72,12 @@ Status TreeAHHybridResidual::EnableCrowdingImpl(
   return OkStatus();
 }
 
+void TreeAHHybridResidual::DisableCrowdingImpl() {
+  for (auto& ls : leaf_searchers_) {
+    ls->DisableCrowding();
+  }
+}
+
 Status TreeAHHybridResidual::CheckBuildLeafSearchersPreconditions(
     const AsymmetricHasherConfig& config,
     const KMeansTreeLikePartitioner<float>& partitioner) const {
@@ -87,15 +93,8 @@ Status TreeAHHybridResidual::CheckBuildLeafSearchersPreconditions(
            << "For TreeAHHybridResidual, partitioner must use "
               "DotProductDistance for query tokenization.";
   }
-  if (!(config.partition_level_confidence_interval_stdevs() >= 0.0)) {
-    return InvalidArgumentErrorBuilder().LogError()
-           << "partition_level_confidence_interval_stdevs must not be negative "
-              "or NaN.";
-  }
-  if (config.partition_level_confidence_interval_stdevs() > 0.0 && !dataset()) {
-    return FailedPreconditionErrorBuilder().LogError()
-           << "partition_level_confidence_interval_stdevs not yet supported "
-              "when original dataset is not available.";
+  if (config.partition_level_confidence_interval_stdevs() != 0.0) {
+    LOG(WARNING) << "partition_level_confidence_interval_stdevs has no effect.";
   }
   return OkStatus();
 }
@@ -221,17 +220,27 @@ StatusOr<uint8_t> TreeAHHybridResidual::ComputeGlobalTopNShift(
   return global_topn_shift;
 }
 
-StatusOr<unique_ptr<SearchParameters::UnlockedQueryPreprocessingResults>>
-TreeAHHybridResidual::UnlockedPreprocessQuery(
-    const DatapointPtr<float>& query) const {
+Status TreeAHHybridResidual::PreprocessQueryIntoParamsUnlocked(
+    const DatapointPtr<float>& query, SearchParameters& search_params) const {
+  const auto& params =
+      search_params
+          .searcher_specific_optional_parameters<TreeXOptionalParameters>();
+  int32_t max_centers_override = 0;
+
+  if (params)
+    max_centers_override = params->num_partitions_to_search_override();
+
   vector<KMeansTreeSearchResult> centers_to_search;
   SCANN_RETURN_IF_ERROR(query_tokenizer_->TokensForDatapointWithSpilling(
-      query, 0, &centers_to_search));
+      query, max_centers_override, &centers_to_search));
+
   TF_ASSIGN_OR_RETURN(
       auto shared_lookup_table,
       asymmetric_queryer_->CreateLookupTable(query, lookup_type_tag_));
-  return {make_unique<UnlockedTreeAHHybridResidualPreprocessingResults>(
-      std::move(centers_to_search), std::move(shared_lookup_table))};
+  search_params.set_unlocked_query_preprocessing_results(
+      {make_unique<UnlockedTreeAHHybridResidualPreprocessingResults>(
+          std::move(centers_to_search), std::move(shared_lookup_table))});
+  return OkStatus();
 }
 
 Status TreeAHHybridResidual::BuildLeafSearchers(
@@ -239,7 +248,7 @@ Status TreeAHHybridResidual::BuildLeafSearchers(
     unique_ptr<KMeansTreeLikePartitioner<float>> partitioner,
     shared_ptr<const asymmetric_hashing2::Model<float>> ah_model,
     vector<std::vector<DatapointIndex>> datapoints_by_token,
-    const DenseDataset<uint8_t>* hashed_dataset, thread::ThreadPool* pool) {
+    const DenseDataset<uint8_t>* hashed_dataset, ThreadPool* pool) {
   DCHECK(partitioner);
   SCANN_RETURN_IF_ERROR(
       CheckBuildLeafSearchersPreconditions(config, *partitioner));
@@ -303,10 +312,6 @@ Status TreeAHHybridResidual::BuildLeafSearchers(
           projector, lookup_distance, ah_model);
   leaf_searchers_ = vector<unique_ptr<asymmetric_hashing2::Searcher<float>>>(
       datapoints_by_token.size());
-  vector<float> ah_variance_adjustment_by_token;
-  if (config.partition_level_confidence_interval_stdevs() > 0) {
-    ah_variance_adjustment_by_token.resize(datapoints_by_token.size());
-  }
   Status status = OkStatus();
   absl::Mutex status_mutex;
   auto set_status = [&](Status new_status) {
@@ -321,7 +326,6 @@ Status TreeAHHybridResidual::BuildLeafSearchers(
       hashed_partition->set_packing_strategy(HashedItem::NIBBLE);
     }
     Datapoint<uint8_t> dp;
-    double ah_residual_squared_norm_sum = 0.0;
     Datapoint<uint8_t> hashed_storage;
     for (DatapointIndex dp_index : datapoints_by_token[token]) {
       auto status_or_hashed_dptr =
@@ -336,41 +340,11 @@ Status TreeAHHybridResidual::BuildLeafSearchers(
         set_status(local_status);
         return;
       }
-      if (config.partition_level_confidence_interval_stdevs() > 0.0) {
-        DCHECK(dataset);
-        auto status_or = partitioner->ResidualizeToFloat(
-            (*dataset)[dp_index], token, normalize_residual_by_cluster_stdev);
-        local_status = status_or.status();
-        Datapoint<float> ah_residual;
-        if (local_status.ok()) {
-          auto partitioning_residual = std::move(status_or.ValueOrDie());
-          local_status = indexer->ComputeResidual(partitioning_residual.ToPtr(),
-                                                  hashed_dptr, &ah_residual);
-        }
-        if (!local_status.ok()) {
-          set_status(local_status);
-          return;
-        }
-        ah_residual_squared_norm_sum += SquaredL2Norm(ah_residual.ToPtr());
-      }
     }
-    if (!ah_variance_adjustment_by_token.empty()) {
-      if (datapoints_by_token[token].empty()) {
-        set_status(InvalidArgumentError(
-            "Cannot enable partition_level_confidence_interval_stdevs without "
-            "at least one datapoint in every partition."));
-        return;
-      }
-      ah_variance_adjustment_by_token[token] =
-          std::sqrt(
-              ah_residual_squared_norm_sum /
-              (datapoints_by_token[token].size() * dataset->dimensionality())) *
-          config.partition_level_confidence_interval_stdevs();
-    }
-    asymmetric_hashing2::SearcherOptions<float> opts;
+    asymmetric_hashing2::SearcherOptions<float> opts(asymmetric_queryer_,
+                                                     indexer);
     opts.set_asymmetric_lookup_type(lookup_type_tag_);
     opts.set_noise_shaping_threshold(config.noise_shaping_threshold());
-    opts.EnableAsymmetricQuerying(asymmetric_queryer_, indexer);
     leaf_searchers_[token] = make_unique<asymmetric_hashing2::Searcher<float>>(
         nullptr, std::move(hashed_partition), std::move(opts),
         default_pre_reordering_num_neighbors(),
@@ -391,7 +365,6 @@ Status TreeAHHybridResidual::BuildLeafSearchers(
     }
   }
 
-  ah_variance_adjustment_by_token_ = std::move(ah_variance_adjustment_by_token);
   datapoints_by_token_ = std::move(datapoints_by_token);
   leaf_tokens_by_norm_ = OrderLeafTokensByCenterNorm(*partitioner);
   partitioner->set_tokenization_mode(UntypedPartitioner::QUERY);
@@ -428,26 +401,7 @@ Status TreeAHHybridResidual::FindNeighborsImpl(const DatapointPtr<float>& query,
 }
 
 namespace {
-
-bool SupportsLowLevelBatching(const TypedDataset<float>& queries,
-                              ConstSpan<SearchParameters> params) {
-  if (!queries.IsDense()) return false;
-  for (const SearchParameters& p : params) {
-    if (p.pre_reordering_crowding_enabled() || p.restricts_enabled()) {
-      return false;
-    }
-  }
-  return true;
-}
-
-struct QueryForLeaf {
-  QueryForLeaf() {}
-  QueryForLeaf(DatapointIndex query_index, float distance_to_center)
-      : query_index(query_index), distance_to_center(distance_to_center) {}
-
-  DatapointIndex query_index = 0;
-  float distance_to_center = NAN;
-};
+using QueryForLeaf = tree_x_internal::QueryForResidualLeaf;
 
 vector<std::vector<QueryForLeaf>> InvertCentersToSearch(
     ConstSpan<vector<KMeansTreeSearchResult>> centers_to_search,
@@ -462,49 +416,6 @@ vector<std::vector<QueryForLeaf>> InvertCentersToSearch(
     }
   }
   return result;
-}
-
-vector<SearchParameters> CreateParamsSubsetForLeaf(
-    ConstSpan<SearchParameters> params,
-    ConstSpan<FastTopNeighbors<float>::Mutator> mutators,
-    ConstSpan<
-        shared_ptr<asymmetric_hashing2::AsymmetricHashingOptionalParameters>>
-        lookup_tables,
-    ConstSpan<QueryForLeaf> queries_for_leaf) {
-  vector<SearchParameters> result;
-  result.reserve(queries_for_leaf.size());
-  for (const QueryForLeaf& q : queries_for_leaf) {
-    SearchParameters leaf_params;
-    leaf_params.set_pre_reordering_num_neighbors(
-        params[q.query_index].pre_reordering_num_neighbors());
-    leaf_params.set_pre_reordering_epsilon(mutators[q.query_index].epsilon() -
-                                           q.distance_to_center);
-    leaf_params.set_searcher_specific_optional_parameters(
-        lookup_tables[q.query_index]);
-    result.emplace_back(std::move(leaf_params));
-  }
-  return result;
-}
-
-template <typename Mutator>
-void AddLeafResultsToTopN(ConstSpan<DatapointIndex> local_to_global_index,
-                          const float distance_to_center,
-                          const float query_variance_adjustment,
-                          const float cluster_stdev_adjustment,
-                          ConstSpan<pair<DatapointIndex, float>> leaf_results,
-                          Mutator* mutator) {
-  float epsilon = mutator->epsilon();
-  const float per_leaf_term = distance_to_center - query_variance_adjustment;
-  for (const auto& result : leaf_results) {
-    const float dist = result.second * cluster_stdev_adjustment + per_leaf_term;
-    if (dist < epsilon) {
-      if (ABSL_PREDICT_FALSE(
-              mutator->Push(local_to_global_index[result.first], dist))) {
-        mutator->GarbageCollect();
-        epsilon = mutator->epsilon();
-      }
-    }
-  }
 }
 
 template <typename TopN>
@@ -541,7 +452,7 @@ Status TreeAHHybridResidual::FindNeighborsBatchedImpl(
     SCANN_RETURN_IF_ERROR(
         query_tokenizer_->TokensForDatapointWithSpillingBatched(
             queries, vector<int32_t>(), MakeMutableSpan(centers_to_search)));
-  if (!SupportsLowLevelBatching(queries, params) ||
+  if (!tree_x_internal::SupportsLowLevelBatching(queries, params) ||
       !leaf_searchers_[0]->lut16_ ||
       leaf_searchers_[0]->opts_.quantization_scheme() ==
           AsymmetricHasherConfig::PRODUCT_AND_BIAS) {
@@ -553,9 +464,9 @@ Status TreeAHHybridResidual::FindNeighborsBatchedImpl(
   }
   auto queries_by_leaf =
       InvertCentersToSearch(centers_to_search, query_tokenizer_->n_tokens());
-  vector<shared_ptr<AsymmetricHashingOptionalParameters>> lookup_tables(
+  vector<shared_ptr<const SearcherSpecificOptionalParameters>> lookup_tables(
       queries.size());
-  for (size_t i = 0; i < queries.size(); ++i) {
+  for (size_t i : IndicesOf(queries)) {
     TF_ASSIGN_OR_RETURN(auto lut, asymmetric_queryer_->CreateLookupTable(
                                       queries[i], lookup_type_tag_));
     lookup_tables[i] =
@@ -573,8 +484,9 @@ Status TreeAHHybridResidual::FindNeighborsBatchedImpl(
   for (size_t leaf_token : leaf_tokens_by_norm_) {
     ConstSpan<QueryForLeaf> queries_for_cur_leaf = queries_by_leaf[leaf_token];
     if (queries_for_cur_leaf.empty()) continue;
-    vector<SearchParameters> leaf_params = CreateParamsSubsetForLeaf(
-        params, mutators, lookup_tables, queries_for_cur_leaf);
+    vector<SearchParameters> leaf_params =
+        tree_x_internal::CreateParamsSubsetForLeaf<QueryForLeaf>(
+            params, mutators, lookup_tables, queries_for_cur_leaf);
     auto get_query = [&queries, &queries_for_cur_leaf](DatapointIndex i) {
       return queries[queries_for_cur_leaf[i].query_index];
     };
@@ -590,10 +502,6 @@ Status TreeAHHybridResidual::FindNeighborsBatchedImpl(
 
     ConstSpan<DatapointIndex> local_to_global_index =
         datapoints_by_token_[leaf_token];
-    const float partition_variance_adjustment =
-        ah_variance_adjustment_by_token_.empty()
-            ? 0.0f
-            : ah_variance_adjustment_by_token_[leaf_token];
     auto status_or_partition_stdev =
         query_tokenizer_->ResidualStdevForToken(leaf_token);
     const float partition_stdev = status_or_partition_stdev.ok()
@@ -602,15 +510,9 @@ Status TreeAHHybridResidual::FindNeighborsBatchedImpl(
     for (size_t j = 0; j < queries_for_cur_leaf.size(); ++j) {
       const DatapointIndex cur_query_index =
           queries_for_cur_leaf[j].query_index;
-      const float query_variance_adjustment =
-          partition_variance_adjustment
-              ? (partition_variance_adjustment *
-                 std::sqrt(SquaredL2Norm(queries[cur_query_index])))
-              : 0.0f;
-      AddLeafResultsToTopN(local_to_global_index,
-                           queries_for_cur_leaf[j].distance_to_center,
-                           query_variance_adjustment, partition_stdev,
-                           leaf_results[j], &mutators[cur_query_index]);
+      tree_x_internal::AddLeafResultsToTopN(
+          local_to_global_index, queries_for_cur_leaf[j].distance_to_center,
+          partition_stdev, leaf_results[j], &mutators[cur_query_index]);
     }
   }
   for (size_t query_index = 0; query_index < results.size(); ++query_index) {
@@ -655,17 +557,11 @@ Status TreeAHHybridResidual::FindNeighborsInternal1(
     leaf_params.set_searcher_specific_optional_parameters(leaf_specific_params);
     NNResultsVector unused_leaf_results;
 
-    float query_l2 = std::sqrt(SquaredL2Norm(query));
     for (size_t i = 0; i < centers_to_search.size(); ++i) {
       const uint32_t token = centers_to_search[i].node->LeafId();
       const float distance_to_center = centers_to_search[i].distance_to_center;
-      const float partition_variance_adjustment =
-          ah_variance_adjustment_by_token_.empty()
-              ? 0.0f
-              : ah_variance_adjustment_by_token_[token] * query_l2;
-      leaf_specific_params->SetIndexAndBias(
-          token << global_topn_shift_,
-          distance_to_center - partition_variance_adjustment);
+      leaf_specific_params->SetIndexAndBias(token << global_topn_shift_,
+                                            distance_to_center);
 
       TranslateGlobalToLeafLocalWhitelist(params, datapoints_by_token_[token],
                                           &leaf_params);
@@ -730,15 +626,10 @@ Status TreeAHHybridResidual::FindNeighborsInternal2(
     SCANN_RETURN_IF_ERROR(
         leaf_searchers_[token]->FindNeighborsNoSortNoExactReorder(
             query, leaf_params, &leaf_results));
-    float query_variance_adjustment =
-        ah_variance_adjustment_by_token_.empty()
-            ? 0.0f
-            : (ah_variance_adjustment_by_token_[token] *
-               std::sqrt(SquaredL2Norm(query)));
     float cluster_stdev_adjustment = centers_to_search[i].residual_stdev;
-    AddLeafResultsToTopN(datapoints_by_token_[token], distance_to_center,
-                         query_variance_adjustment, cluster_stdev_adjustment,
-                         leaf_results, &mutator);
+    tree_x_internal::AddLeafResultsToTopN(
+        datapoints_by_token_[token], distance_to_center,
+        cluster_stdev_adjustment, leaf_results, &mutator);
   }
   mutator.Release();
 
@@ -829,5 +720,4 @@ void TreeAHHybridResidual::AttemptEnableGlobalTopN() {
   enable_global_topn_ = true;
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

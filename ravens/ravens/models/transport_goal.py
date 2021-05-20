@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#!/usr/bin/env python
 """Goal-conditioned transport Module."""
 
 import cv2
@@ -20,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ravens import utils
-from ravens.models import ResNet43_8s
+from ravens.models.resnet import ResNet43_8s
 
 import tensorflow as tf
 import tensorflow_addons as tfa

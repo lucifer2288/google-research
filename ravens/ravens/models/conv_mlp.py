@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@
 """Conv MLP module."""
 
 import numpy as np
-from ravens.models import MlpModel
-from ravens.models import ResNet43_8s
+from ravens.models.gt_state import MlpModel
+from ravens.models.resnet import ResNet43_8s
 import tensorflow as tf
 tf.compat.v1.enable_eager_execution()
 from tensorflow.keras import layers  # pylint: disable=g-import-not-at-top

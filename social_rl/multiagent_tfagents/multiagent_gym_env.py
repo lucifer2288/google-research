@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ class MultiagentGymWrapper(gym_wrapper.GymWrapper):
     single_action_spec = BoundedTensorSpec(
         shape=(), dtype=self._action_spec.dtype, name=self._action_spec.name,
         minimum=self._action_spec.minimum, maximum=self._action_spec.maximum)
-    self._action_spec = [single_action_spec] * n_agents
+    self._action_spec = (single_action_spec,) * n_agents
 
   def reward_spec(self):
     """Defines a vector reward based on the number of agents.
@@ -83,7 +83,7 @@ class MultiagentGymWrapper(gym_wrapper.GymWrapper):
 
   def _step(self, action):
     # Automatically reset the environments on step if they need to be reset.
-    if self._auto_reset and self._done:
+    if self._handle_auto_reset and self._done:
       return self.reset()
 
     # Some environments (e.g. FrozenLake) use the action as a key to the

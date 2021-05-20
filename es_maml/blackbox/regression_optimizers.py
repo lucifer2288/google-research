@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ def vector_decoding_function(A, b, optimization_parameters, loss_function):
   regularization_parameter.value = optimization_parameters
   problem = cp.Problem(
       cp.Minimize(loss_function(A, b, x, regularization_parameter)))
-  problem.solve()
+  problem.solve(solver=cp.ECOS)
   result = x.value
   res_list = []
   for i in range(n):

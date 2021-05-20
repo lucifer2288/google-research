@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -231,7 +231,7 @@ class AddLearnedPositionalEncodings(nn.Module):
         cache.store(cache_entry)
         _, _, df = pos_embedding.shape
         pe = lax.dynamic_slice(pos_embedding, jnp.array((0, i, 0)),
-                               jnp.array((1, 1, df)))
+                               (1, 1, df))
     if inputs_positions is None:
       # normal unpacked case:
       return inputs + pe

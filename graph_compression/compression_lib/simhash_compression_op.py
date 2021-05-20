@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,10 +25,11 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 
 from graph_compression.compression_lib import compression_op
+from graph_compression.compression_lib import compression_op_utils
 from graph_compression.compression_lib import decompose_matrix
 from graph_compression.compression_lib import kmeans_quantize
+from model_pruning.python import hparam
 from model_pruning.python import pruning
-from tensorflow.contrib.training.python.training import hparam
 
 
 class SimhashMatrixCompressor(compression_op.LowRankDecompMatrixCompressor):
@@ -136,13 +137,13 @@ class SimhashCompressionOp(compression_op.CompressionOp):
   def add_compression_summaries(self):
     """Adds summaries of alpha value and last update step."""
     with tf.compat.v1.name_scope(self._spec.name + '_summaries'):
-      tf.compat.v1.summary.scalar('last_alpha_update_step',
+      tf.compat.v2.summary.scalar('last_alpha_update_step',
                                   self._last_alpha_update_step)
-      tf.compat.v1.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
-      tf.compat.v1.summary.scalar(
+      tf.compat.v2.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
+      tf.compat.v2.summary.scalar(
           self.a_matrix_tfvar.op.name + '/a_matrix_norm',
           tf.norm(tensor=self.a_matrix_tfvar))
-      tf.compat.v1.summary.scalar(
+      tf.compat.v2.summary.scalar(
           self.b_matrix_tfvar.op.name + '/b_matrix_norm',
           tf.norm(tensor=self.b_matrix_tfvar))
 
@@ -220,7 +221,8 @@ class SimhashCompressionOp(compression_op.CompressionOp):
     else:
       self.setup_update_explicit()
 
-    self.add_compression_summaries()
+    if self._spec.add_summary:
+      self.add_compression_summaries()
     return [self.final_op, self.update_op]
 
   def get_customized_apply_compression_op(self,
@@ -280,7 +282,8 @@ class SimhashCompressionOp(compression_op.CompressionOp):
     else:
       self.setup_update_explicit()
 
-    self.add_compression_summaries()
+    if self._spec.add_summary:
+      self.add_compression_summaries()
     return [self.final_op, self.update_op]
 
   def get_mix_operator(self, theta, concat):
@@ -334,12 +337,17 @@ class SimhashApplyCompression(compression_op.ApplyCompression):
         global_step=global_step)
     self._compression_op_spec_orig = copy.deepcopy(self._compression_op_spec)
 
-  def apply_compression(self, a_matrix_tfvar, scope='default_scope'):
+  def apply_compression(self,
+                        a_matrix_tfvar,
+                        scope='default_scope',
+                        spec=None):
     """Applies matrix compression OP on a_matrix_tfvar as specified in spec.
 
     Args:
       a_matrix_tfvar: TF variable representing a tensor variable in a model.
       scope: TF scope used for creating new TF variables.
+      spec: spec to be used for the compression op. this is optional.
+            if not provided, self._compression_op_spec is used.
 
     Returns:
       A TF node that represents the compressed version of a_matrix_tfvar.
@@ -347,16 +355,17 @@ class SimhashApplyCompression(compression_op.ApplyCompression):
     logging.info('New and old begin_compression_step are: %s, %s',
                  self._compression_op_spec.begin_compression_step,
                  self._compression_op_spec_orig.begin_compression_step)
+    compression_op_spec = spec if spec else self._compression_op_spec
 
-    if self._compression_op_spec.compression_option == 4:
+    if compression_op_spec.compression_option == 4:
       c = KMeansCompressionOp(
-          spec=self._compression_op_spec, global_step=self._global_step)
-    elif self._compression_op_spec.compression_option == 8:
+          spec=compression_op_spec, global_step=self._global_step)
+    elif compression_op_spec.compression_option == 8:
       c = KMeansPruningCompressionOp(
           spec=self._compression_op_spec, global_step=self._global_step)
     else:
       c = SimhashCompressionOp(
-          spec=self._compression_op_spec, global_step=self._global_step)
+          spec=compression_op_spec, global_step=self._global_step)
 
     self._compression_ops.append(c)
     [a_matrix_compressed, a_matrix_update_op] = c.get_apply_compression_op(
@@ -374,7 +383,7 @@ class SimhashApplyCompression(compression_op.ApplyCompression):
                                    weight_params_fn,
                                    weight_init_obj,
                                    scope='default_scope',
-                                   optional_mask=None):
+                                   spec=None):
     """Applies matrix compression OP on a_matrix_tfvar as specified in spec.
 
     Args:
@@ -383,43 +392,32 @@ class SimhashApplyCompression(compression_op.ApplyCompression):
       weight_params_fn: functional handle to create model parameters.
       weight_init_obj: a weight initialization object.
       scope: TF scope used for creating new TF variables.
-      optional_mask: a TensorFlow variable that corresponds to the pruning mask,
-        should only be use for KmeansPruningCompressionOp. Default is None.
+      spec: spec to be used for the compression op. this is optional.
+            if not provided, self._compression_op_spec is used.
 
     Returns:
       A TF node that represents the compressed version of a_matrix_tfvar.
     """
-
-    if self._compression_op_spec.compression_option == 4:
+    compression_op_spec = spec if spec else self._compression_op_spec
+    if compression_op_spec.compression_option == 4:
       c = KMeansCompressionOp(
-          spec=self._compression_op_spec, global_step=self._global_step)
-    elif self._compression_op_spec.compression_option == 8:
+          spec=compression_op_spec, global_step=self._global_step)
+    elif compression_op_spec.compression_option == 8:
       c = KMeansPruningCompressionOp(
-          spec=self._compression_op_spec, global_step=self._global_step)
+          spec=compression_op_spec, global_step=self._global_step)
     else:
       c = SimhashCompressionOp(
-          spec=self._compression_op_spec, global_step=self._global_step)
+          spec=compression_op_spec, global_step=self._global_step)
 
     self._compression_ops.append(c)
-    if self._compression_op_spec.compression_option == 8:
-      [a_matrix_compressed,
-       a_matrix_update_op] = c.get_customized_apply_compression_op(  # pylint: disable=unexpected-keyword-arg
-           a_matrix_tfvar,
-           self._matrix_compressor,
-           layer_obj,
-           weight_params_fn,
-           weight_init_obj,
-           scope=scope,
-           optional_mask=optional_mask)
-    else:
-      [a_matrix_compressed,
-       a_matrix_update_op] = c.get_customized_apply_compression_op(
-           a_matrix_tfvar,
-           self._matrix_compressor,
-           layer_obj,
-           weight_params_fn,
-           weight_init_obj,
-           scope=scope)
+    [a_matrix_compressed,
+     a_matrix_update_op] = c.get_customized_apply_compression_op(
+         a_matrix_tfvar,
+         self._matrix_compressor,
+         layer_obj,
+         weight_params_fn,
+         weight_init_obj,
+         scope=scope)
     self._update_ops.append(a_matrix_update_op)
 
     self.uncompressed_size += c.uncompressed_size
@@ -442,6 +440,17 @@ class SimhashApplyCompression(compression_op.ApplyCompression):
     """
     return self._compression_ops[-1].get_mix_operator(theta, concat)
 
+  def get_update_ops(self):
+    for c in self._compression_ops:
+      self._update_ops.append(c.get_update_op())
+    return self._update_ops
+
+  def all_update_op(self):
+    _ = self.get_update_ops()
+    self._all_update_op = compression_op.CompressionOp.all_update_op(
+        self._update_ops, self._scope)
+    return self._all_update_op
+
 
 class KmeansMatrixCompressor(compression_op.LowRankDecompMatrixCompressor):
   """K-means decomposition compressor.
@@ -462,16 +471,41 @@ class KmeansMatrixCompressor(compression_op.LowRankDecompMatrixCompressor):
     self._spec.is_c_matrix_trainable = False
     self._seed = 42
 
-  def static_matrix_compressor(self, a_matrix):
-    """K-means decomposition of a_matrix.
+  def _get_factor_shapes(self, a_matrix):
+    """Returns shapes of the matrix factors.
 
     Args:
       a_matrix: input matrix
 
     Returns:
+      codebook_shape: tuple of int, representing codebook's shape.
+      encoding_shape: tuple of int, representing encoding's shape.
+    """
+    codebook_shape = (self._spec.rank, self._spec.block_size)
+    encoding_shape = (a_matrix.shape[0],
+                      a_matrix.shape[1] // self._spec.block_size)
+    return codebook_shape, encoding_shape
+
+  def static_matrix_compressor(self, a_matrix, skip_decomp=False):
+    """K-means decomposition of a_matrix.
+
+    If `skip_decomp` is True, no decomposition is performed and random factor
+    matrices are returned.
+
+    Args:
+      a_matrix: input matrix.
+      skip_decomp: skip decomposition and return random factor matrices if True.
+
+    Returns:
       [codebook, a_matrix_encoding]: rows of codebook are centroid vectors, and
       a_matrix_encoding is an array of centroid indices for blocks in a_matrix.
     """
+    if skip_decomp:
+      codebook_shape, encoding_shape = self._get_factor_shapes(a_matrix)
+      codebook_init = np.random.normal(size=codebook_shape)
+      encoding_init = np.random.randint(low=0, high=self._spec.rank,
+                                        size=encoding_shape)
+      return [codebook_init, encoding_init]
     [codebook, a_matrix_encoding] = kmeans_quantize.kmeans_quantize_block(
         a_matrix,
         levels=self._spec.rank,
@@ -489,13 +523,16 @@ class KMeansCompressionOp(compression_op.CompressionOp):
     with tf.name_scope(self._spec.name + '_summaries'):
       logging.info('add_compression_summaries scope name is %s',
                    self._spec.name)
-      tf.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
-      tf.summary.scalar(self.a_matrix_tfvar.op.name + '/a_matrix_norm',
-                        tf.norm(self.a_matrix_tfvar))
-      tf.summary.scalar(self.b_matrix_tfvar.op.name + '/d_matrix_norm',
-                        tf.norm(tf.reshape(self.b_matrix_tfvar, [-1]), ord=1))
-      tf.summary.scalar(self.c_matrix_tfvar.op.name + '/c_matrix_norm',
-                        tf.reduce_sum(self.c_matrix_tfvar))
+      tf.compat.v2.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
+      tf.compat.v2.summary.scalar(
+          self.a_matrix_tfvar.op.name + '/a_matrix_norm',
+          tf.norm(self.a_matrix_tfvar))
+      tf.compat.v2.summary.scalar(
+          self.b_matrix_tfvar.op.name + '/b_matrix_norm',
+          tf.norm(tf.reshape(self.b_matrix_tfvar, [-1]), ord=1))
+      tf.compat.v2.summary.scalar(
+          self.c_matrix_tfvar.op.name + '/c_matrix_norm',
+          tf.reduce_sum(self.c_matrix_tfvar))
 
   def get_apply_compression_op(self,
                                a_matrix_tfvar,
@@ -559,7 +596,8 @@ class KMeansCompressionOp(compression_op.CompressionOp):
                                    tf.cast(self.c_matrix_tfvar, tf.int32)),
             a_matrix_tfvar.shape)
 
-    self.add_compression_summaries()
+    if self._spec.add_summary:
+      self.add_compression_summaries()
     return [self.final_op, self.update_op]
 
   def get_customized_apply_compression_op(self,
@@ -589,17 +627,24 @@ class KMeansCompressionOp(compression_op.CompressionOp):
     """
     self.matrix_compressor = matrix_compressor
     a_matrix = np.zeros(shape=a_matrix_tfvar.shape)
-    [b_matrix, c_matrix] = matrix_compressor.static_matrix_compressor(a_matrix)
+    [b_matrix, c_matrix] = matrix_compressor.static_matrix_compressor(
+        a_matrix, skip_decomp=True)
 
     self.uncompressed_size = matrix_compressor.uncompressed_size
     self.compressed_size = matrix_compressor.compressed_size
+
+    # Use uint8 if number of k-centers is small enough.
+    c_matrix_tfvar_dtype = tf.int32
+    if self._spec.rank <= 256:
+      c_matrix_tfvar_dtype = tf.uint8
 
     p = layer_obj.params
     with tf.variable_scope(scope) as scope:
       b_matrix_pc = weight_params_fn(b_matrix.shape,
                                      weight_init_obj.Constant(1.0), p.dtype)
       c_matrix_pc = weight_params_fn(c_matrix.shape,
-                                     weight_init_obj.Constant(1.0), tf.int32)
+                                     weight_init_obj.Constant(1),
+                                     c_matrix_tfvar_dtype)
       alpha_pc = weight_params_fn([], weight_init_obj.Constant(1.0), tf.float32)
 
       layer_obj.CreateVariable(
@@ -623,13 +668,12 @@ class KMeansCompressionOp(compression_op.CompressionOp):
       if self._spec.update_option == 0:
         self.update_op = self._create_update_op()
       else:
-        self.update_op = self.setup_update_explicit()
+        self.update_op = tf.no_op()
 
-    self.final_op = self.alpha * self.a_matrix_tfvar + (
-        1 - self.alpha) * tf.nn.embedding_lookup(self.b_matrix_tfvar,
-                                                 self.c_matrix_tfvar)
+    self.final_op = self.a_matrix_tfvar
 
-    self.add_compression_summaries()
+    if self._spec.add_summary:
+      self.add_compression_summaries()
     return [self.final_op, self.update_op]
 
   def get_mix_operator(self, theta, concat):
@@ -649,7 +693,55 @@ class KMeansCompressionOp(compression_op.CompressionOp):
         theta.alpha * tf.matmul(concat, theta.wm) +
         (1 - theta.alpha) * tf.matmul(
             concat,
-            tf.nn.embedding_lookup(theta.b_matrix_tfvar, theta.c_matrix_tfvar)))
+            tf.nn.embedding_lookup(theta.b_matrix_tfvar,
+                                   tf.cast(theta.c_matrix_tfvar, tf.int32))))
+
+  def flat_embedding_lookup(self, emb_table, flat_ids, vocab_size,
+                            matmul_axis=1,
+                            fprop_type='matmul'):
+    if fprop_type == 'matmul':
+      lhs = tf.equal(
+          tf.expand_dims(flat_ids, matmul_axis),
+          tf.cast(tf.range(vocab_size, dtype=tf.int32), flat_ids.dtype))
+      if emb_table.dtype == tf.uint8:
+        return tf.cast(
+            tf.matmul(tf.cast(lhs, tf.int32), tf.cast(emb_table, tf.int32)),
+            tf.uint8)
+      else:
+        return tf.matmul(tf.cast(lhs, emb_table.dtype), emb_table)
+    else:
+      return tf.nn.embedding_lookup(emb_table, tf.cast(flat_ids, tf.int32))
+
+  def get_embedding_lookup_operator(self, theta, flat_ids, fprop_type='matmul'):
+    """Perform gather based embedding lookup.
+
+    Args:
+      theta: layer parameter class, theta should have an attribute theta.wm
+        which is the embedding table.
+      flat_ids: one dimensional tensor of ids, tf.Tensor of tf.int32 type.
+      fprop_type: embedding lookup type: should be 'matmul' or  'gather'.
+
+    Returns:
+      Compressed version of tf.nn.embedding_lookup(theta.wm, flat_ids).
+    """
+    single_emb_result = self.flat_embedding_lookup(theta.wm, flat_ids,
+                                                   theta.wm.shape[0],
+                                                   matmul_axis=1,
+                                                   fprop_type=fprop_type)
+    double_emb_result = self.flat_embedding_lookup(
+        theta.b_matrix_tfvar,
+        self.flat_embedding_lookup(theta.c_matrix_tfvar, flat_ids,
+                                   theta.c_matrix_tfvar.shape[0],
+                                   matmul_axis=1,
+                                   fprop_type=fprop_type),
+        256,
+        matmul_axis=2,
+        fprop_type=fprop_type)
+    double_emb_result = compression_op_utils.flatten_last_dims(
+        double_emb_result, ndims=2)
+
+    return (theta.alpha * single_emb_result +
+            (1 - theta.alpha) * double_emb_result)
 
 
 class KMeansPruningCompressionOp(compression_op.CompressionOp):
@@ -734,13 +826,16 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
     with tf.name_scope(self._spec.name + '_summaries'):
       logging.info('add_compression_summaries scope name is %s',
                    self._spec.name)
-      tf.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
-      tf.summary.scalar(self.a_matrix_tfvar.op.name + '/a_matrix_norm',
-                        tf.norm(self.a_matrix_tfvar))
-      tf.summary.scalar(self.b_matrix_tfvar.op.name + '/d_matrix_norm',
-                        tf.norm(tf.reshape(self.b_matrix_tfvar, [-1]), ord=1))
-      tf.summary.scalar(self.c_matrix_tfvar.op.name + '/c_matrix_norm',
-                        tf.reduce_sum(self.c_matrix_tfvar))
+      tf.compat.v2.summary.scalar(self.alpha.op.name + '/alpha', self.alpha)
+      tf.compat.v2.summary.scalar(
+          self.a_matrix_tfvar.op.name + '/a_matrix_norm',
+          tf.norm(self.a_matrix_tfvar))
+      tf.compat.v2.summary.scalar(
+          self.b_matrix_tfvar.op.name + '/d_matrix_norm',
+          tf.norm(tf.reshape(self.b_matrix_tfvar, [-1]), ord=1))
+      tf.compat.v2.summary.scalar(
+          self.c_matrix_tfvar.op.name + '/c_matrix_norm',
+          tf.reduce_sum(self.c_matrix_tfvar))
 
   def get_apply_compression_op(self,
                                a_matrix_tfvar,
@@ -763,9 +858,10 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
     """
     self.matrix_compressor = matrix_compressor
     a_matrix = np.zeros(shape=a_matrix_tfvar.shape)
-    if self._spec.do_transpose:
+    if getattr(self._spec, 'do_transpose', False):
       a_matrix = np.transpose(a_matrix)
-    [b_matrix, c_matrix] = matrix_compressor.static_matrix_compressor(a_matrix)
+    [b_matrix, c_matrix] = matrix_compressor.static_matrix_compressor(
+        a_matrix, skip_decomp=True)
 
     self.uncompressed_size = matrix_compressor.uncompressed_size
     self.compressed_size = matrix_compressor.compressed_size
@@ -787,9 +883,6 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
       self.a_matrix_tfvar = a_matrix_tfvar
       [self.pruned_a_matrix_tfvar, self.mask] = pruning.apply_mask_and_return(
           self.a_matrix_tfvar, scope)
-
-      if self._spec.update_option in [0, 2]:
-        self.update_op = self._create_update_op()
 
     def maybe_apply_compression():
       """Decide whether global step is within compression range.
@@ -818,7 +911,7 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
                 tf.less(self._spec.end_compression_step, 0)))
         return is_step_within_compression_range
 
-    if self._spec.do_transpose:
+    if getattr(self._spec, 'do_transpose', False):
       self.pruning_and_compression_op = self.alpha * self.pruned_a_matrix_tfvar + (
           1 - self.alpha) * tf.math.multiply(tf.transpose(
               tf.reshape(tf.nn.embedding_lookup(
@@ -842,11 +935,22 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
     self.final_op = tf.cond(maybe_apply_compression(),
                             quantized_pruned_a_matrix_fn, pruned_a_matrix_fn)
 
-    self.add_compression_summaries()
+    if self._spec.add_summary:
+      self.add_compression_summaries()
     self.pruning_obj.add_pruning_summaries()
     self.mask_update_op = self.pruning_obj.conditional_mask_update_op()
-    self.update_op = tf.group(self.update_op, self.mask_update_op)
+    self.update_op = self.mask_update_op
     return [self.final_op, self.update_op]
+
+  def _create_layer_variable(self,
+                             layer_obj,
+                             var_name,
+                             var_pc,
+                             var_theta_fn=None,
+                             trainable=False):
+    if not hasattr(layer_obj.vars, var_name):
+      layer_obj.CreateVariable(
+          var_name, var_pc, theta_fn=var_theta_fn, trainable=trainable)
 
   def get_customized_apply_compression_op(self,
                                           a_matrix_tfvar,
@@ -854,8 +958,7 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
                                           layer_obj,
                                           weight_params_fn,
                                           weight_init_obj,
-                                          scope='default_scope',
-                                          optional_mask=None):
+                                          scope='default_scope'):
     """Returns pruning + kmeans compressed operator for a customized layer.
 
     Args:
@@ -867,20 +970,16 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
       weight_params_fn: functional handle to create model parameters.
       weight_init_obj: a weight initialization object.
       scope: TF scope used for creating new TF variables.
-      optional_mask: TF variable representing the pruning mask. Caller of this
-        method should pass in this variable if the mask variable is already
-        created. Note the mask variable is created and managed by layer_obj. If
-        None, a mask variable is created in this method. Default value: None.
 
     Returns:
       A TF node that has the compressed version of a_matrix_tfvar.
     """
     self.matrix_compressor = matrix_compressor
     a_matrix = np.zeros(shape=a_matrix_tfvar.shape)
-    if self._spec.do_transpose:
+    if getattr(self._spec, 'do_transpose', False):
       a_matrix = np.transpose(a_matrix)
-    [b_matrix, c_matrix] = matrix_compressor.static_matrix_compressor(a_matrix)
-    a_matrix = np.transpose(a_matrix)
+    [b_matrix, c_matrix] = matrix_compressor.static_matrix_compressor(
+        a_matrix, skip_decomp=True)
 
     self.uncompressed_size = matrix_compressor.uncompressed_size
     self.compressed_size = matrix_compressor.compressed_size
@@ -888,16 +987,13 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
     p = layer_obj.params
     with tf.variable_scope(scope) as scope:
       # Create pruning relevant variables.
-      if optional_mask is None:
-        mask_pc = weight_params_fn(a_matrix.shape,
-                                   weight_init_obj.Constant(1.0), p.dtype)
+      mask_pc = weight_params_fn(a_matrix.shape, weight_init_obj.Constant(1.0),
+                                 p.dtype)
       threshold_pc = weight_params_fn([], weight_init_obj.Constant(0.0),
                                       tf.float32)
-      if optional_mask is None:
-        layer_obj.CreateVariable(
-            'mask', mask_pc, theta_fn=None, trainable=False)
-      layer_obj.CreateVariable(
-          'threshold', threshold_pc, theta_fn=None, trainable=False)
+      self._create_layer_variable(layer_obj, 'mask', mask_pc, None, False)
+      self._create_layer_variable(layer_obj, 'threshold', threshold_pc, None,
+                                  False)
       if layer_obj.vars.mask not in tf.get_collection(pruning.MASK_COLLECTION):
         tf.add_to_collection(pruning.WEIGHT_COLLECTION, layer_obj.vars.wm)
         tf.add_to_collection(pruning.MASK_COLLECTION, layer_obj.vars.mask)
@@ -908,12 +1004,11 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
       ]:
         grad_pc = weight_params_fn(a_matrix.shape,
                                    weight_init_obj.Constant(0.0), p.dtype)
-        layer_obj.CreateVariable(
-            'gradient', grad_pc, theta_fn=None, trainable=False)
-        layer_obj.CreateVariable(
-            'old_weight', grad_pc, theta_fn=None, trainable=False)
-        layer_obj.CreateVariable(
-            'old_old_weight', grad_pc, theta_fn=None, trainable=False)
+        self._create_layer_variable(layer_obj, 'gradient', grad_pc, None, False)
+        self._create_layer_variable(layer_obj, 'old_weight', grad_pc, None,
+                                    False)
+        self._create_layer_variable(layer_obj, 'old_old_weight', grad_pc, None,
+                                    False)
         tf.add_to_collection(pruning.WEIGHT_GRADIENT_COLLECTION,
                              layer_obj.vars.gradient)
         tf.add_to_collection(pruning.OLD_WEIGHT_COLLECTION,
@@ -927,33 +1022,30 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
                                      weight_init_obj.Constant(1), tf.int32)
       alpha_pc = weight_params_fn([], weight_init_obj.Constant(1.0), tf.float32)
 
-      layer_obj.CreateVariable(
-          'alpha', alpha_pc, theta_fn=None, trainable=False)
-      layer_obj.CreateVariable(
+      self._create_layer_variable(layer_obj, 'alpha', alpha_pc, None, False)
+      self._create_layer_variable(
+          layer_obj,
           'b_matrix_tfvar',
           b_matrix_pc,
-          theta_fn=None,
+          None,
           trainable=self.matrix_compressor.get_spec().is_b_matrix_trainable)
-      layer_obj.CreateVariable(
+      self._create_layer_variable(
+          layer_obj,
           'c_matrix_tfvar',
           c_matrix_pc,
-          theta_fn=None,
+          None,
           trainable=self.matrix_compressor.get_spec().is_c_matrix_trainable)
 
       self.b_matrix_tfvar = layer_obj.vars.b_matrix_tfvar
       self.c_matrix_tfvar = layer_obj.vars.c_matrix_tfvar
       self.alpha = layer_obj.vars.alpha
       self.a_matrix_tfvar = a_matrix_tfvar
-      self.mask = layer_obj.vars.mask if optional_mask is None else optional_mask
+      self.mask = layer_obj.vars.mask
+      self.threshold = layer_obj.vars.threshold
 
       self.pruned_a_matrix_tfvar = tf.multiply(layer_obj.vars.wm,
                                                layer_obj.vars.mask,
                                                'masked_weight')
-
-      if self._spec.update_option in [0, 2]:
-        self.update_op = self._create_update_op()
-      else:
-        self.update_op = self.setup_update_explicit()
 
     def maybe_apply_compression():
       """Decide whether global step is within compression range.
@@ -985,20 +1077,27 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
                 tf.less(self._spec.end_compression_step, 0)))
         return is_step_within_compression_range
 
-    if self._spec.do_transpose:
-      self.pruning_and_compression_op = self.alpha * self.pruned_a_matrix_tfvar + (
-          1 - self.alpha) * tf.math.multiply(tf.transpose(
-              tf.reshape(tf.nn.embedding_lookup(
-                  self.b_matrix_tfvar, self.c_matrix_tfvar),
-                         tf.transpose(a_matrix_tfvar).shape)), self.mask,
-                                             name='pruned_compressed_weight')
+    if getattr(self._spec, 'do_transpose', False):
+      self.pruning_and_compression_op = (
+          self.alpha * self.pruned_a_matrix_tfvar +
+          (1 - self.alpha) * tf.math.multiply(
+              tf.transpose(
+                  tf.reshape(
+                      tf.nn.embedding_lookup(self.b_matrix_tfvar,
+                                             self.c_matrix_tfvar),
+                      tf.transpose(a_matrix_tfvar).shape)),
+              self.mask,
+              name='pruned_compressed_weight'))
     else:
-      self.pruning_and_compression_op = self.alpha * self.pruned_a_matrix_tfvar + (
-          1 - self.alpha) * tf.math.multiply(
-              tf.reshape(tf.nn.embedding_lookup(
-                  self.b_matrix_tfvar, self.c_matrix_tfvar),
-                         a_matrix_tfvar.shape),
-              self.mask, name='pruned_compressed_weight')
+      self.pruning_and_compression_op = (
+          self.alpha * self.pruned_a_matrix_tfvar +
+          (1 - self.alpha) * tf.math.multiply(
+              tf.reshape(
+                  tf.nn.embedding_lookup(self.b_matrix_tfvar,
+                                         self.c_matrix_tfvar),
+                  a_matrix_tfvar.shape),
+              self.mask,
+              name='pruned_compressed_weight'))
 
     def pruned_a_matrix_fn():
       return self.pruned_a_matrix_tfvar
@@ -1009,11 +1108,14 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
     self.final_op = tf.cond(maybe_apply_compression(),
                             quantized_pruned_a_matrix_fn, pruned_a_matrix_fn)
 
-    self.add_compression_summaries()
+    if self._spec.add_summary:
+      self.add_compression_summaries()
     self.pruning_obj.add_pruning_summaries()
-    self.mask_update_op = self.pruning_obj.conditional_mask_update_op()
-    self.update_op = tf.group(self.update_op, self.mask_update_op)
+    self.update_op = tf.no_op()
     return [self.final_op, self.update_op]
+
+  def get_update_op(self):
+    return self.pruning_obj.conditional_mask_update_op()
 
   def run_update_step(self, session, step_number=None):
     """Returns the combine update tf OP."""
@@ -1075,7 +1177,7 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
               'step_number is %s, begin, end and update_count are: %s %s %s ',
               step_number, self._spec.begin_compression_step,
               self._spec.end_compression_step, self.run_update_count)
-          if self._spec.do_transpose:
+          if getattr(self._spec, 'do_transpose', False):
             [b_matrix, c_matrix
              ] = self.matrix_compressor.static_matrix_compressor(
                  pruned_a_matrix.T)
@@ -1133,27 +1235,20 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
       A TensorFlow node that has compressed version of
       tf.matmul(concat, theta.wm).
     """
-    def maybe_apply_compression():
-      """Decide whether global step is within compression range.
+    def maybe_choose_compression_path():
+      """Decide whether global step is after begin compression step.
 
       Returns:
-        is_step_within_compression_range: bool.
+        is_step_after_begin_compression: bool.
       """
       with tf.compat.v1.name_scope(self._spec.name):
         global_step = theta.global_step
-        is_step_within_compression_range = tf.logical_and(
-            tf.greater_equal(
-                tf.cast(global_step, tf.int32),
-                self._spec.begin_compression_step),
-            tf.logical_or(
-                tf.less_equal(
-                    tf.cast(global_step, tf.int32),
-                    self._spec.end_compression_step),
-                tf.less(self._spec.end_compression_step, 0)))
-        return is_step_within_compression_range
+        is_step_after_begin_compression = tf.greater_equal(
+            tf.cast(global_step, tf.int32), self._spec.begin_compression_step)
+        return is_step_after_begin_compression
 
     pruning_result = tf.matmul(concat, tf.multiply(theta.wm, theta.mask))
-    if self._spec.do_transpose:
+    if getattr(self._spec, 'do_transpose', False):
       pruning_compression_result = (
           theta.alpha * pruning_result + (1 - theta.alpha) * tf.matmul(
               concat,
@@ -1179,5 +1274,5 @@ class KMeansPruningCompressionOp(compression_op.CompressionOp):
     def quantized_pruned_result_fn():
       return pruning_compression_result
 
-    return tf.cond(maybe_apply_compression(), quantized_pruned_result_fn,
+    return tf.cond(maybe_choose_compression_path(), quantized_pruned_result_fn,
                    pruning_result_fn)

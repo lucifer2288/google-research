@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,12 +23,17 @@ import collections
 from absl import logging
 
 import gin
+import numpy as np
 import tensorflow as tf  # pylint: disable=g-explicit-tensorflow-version-import
 
 from tf_agents.drivers import tf_driver
+from tf_agents.metrics import py_metrics
 from tf_agents.metrics import tf_metric
 from tf_agents.metrics.tf_metrics import TFDeque
 from tf_agents.utils import common
+from tf_agents.utils import numpy_storage
+
+from social_rl.multiagent_tfagents.joint_attention import drivers
 
 
 def zero_out_new_episodes(trajectory, return_accumulator):
@@ -163,6 +168,38 @@ class AverageReturnMetric(tf_metric.TFStepMetric):
     return summaries
 
 
+@gin.configurable
+class MultiagentScalar(tf_metric.TFStepMetric):
+  """Metric to compute average of simple scalars like number of obstacles."""
+
+  def __init__(self,
+               n_agents,
+               name,
+               prefix='Metrics',
+               dtype=tf.float32,
+               buffer_size=10):
+    super(MultiagentScalar, self).__init__(name=name, prefix=prefix)
+    self._buffers = [TFDeque(buffer_size, dtype) for _ in range(n_agents)]
+    self._n_agents = n_agents
+    self._dtype = dtype
+
+  @common.function(autograph=True)
+  def call(self, new_scalar_vals, agent_id):
+    self._buffers[agent_id].add(tf.reduce_mean(new_scalar_vals))
+    return new_scalar_vals
+
+  def result(self):
+    return tf.reduce_mean([buffer.mean() for buffer in self._buffers])
+
+  def result_for_agent(self, agent_id):
+    return self._buffers[agent_id].mean()
+
+  @common.function
+  def reset(self):
+    for buffer in self._buffers:
+      buffer.clear()
+
+
 def log_metrics(metrics, prefix=''):
   log = []
   for m in metrics:
@@ -182,7 +219,8 @@ def eager_compute(metrics,
                   train_step=None,
                   summary_writer=None,
                   summary_prefix='',
-                  use_function=True):
+                  use_function=True,
+                  use_attention_networks=False):
   """Compute metrics using `policy` on the `environment`.
 
   *NOTE*: Because placeholders are not compatible with Eager mode we can not use
@@ -200,6 +238,8 @@ def eager_compute(metrics,
     summary_prefix: An optional prefix scope for metric summaries.
     use_function: Option to enable use of `tf.function` when collecting the
       metrics.
+    use_attention_networks: Option to use attention network architecture in the
+    agent. This architecture requires observations from the previous time step.
   Returns:
     A dictionary of results {metric_name: metric_value}
   """
@@ -208,16 +248,29 @@ def eager_compute(metrics,
 
   multiagent_metrics = [m for m in metrics if 'Multiagent' in m.name]
 
-  driver = tf_driver.TFDriver(
-      environment,
-      policy,
-      observers=metrics,
-      max_episodes=num_episodes,
-      disable_tf_function=not use_function
-      )
+  if use_attention_networks:
+    driver = drivers.StateTFDriver(
+        environment,
+        policy,
+        observers=metrics,
+        max_episodes=num_episodes,
+        disable_tf_function=not use_function,
+    )
+  else:
+    driver = tf_driver.TFDriver(
+        environment,
+        policy,
+        observers=metrics,
+        max_episodes=num_episodes,
+        disable_tf_function=not use_function)
+
   def run_driver():
     time_step = environment.reset()
     policy_state = policy.get_initial_state(environment.batch_size)
+    if use_attention_networks:
+      time_step.observation['policy_state'] = (
+          policy_state['actor_network_state'][0],
+          policy_state['actor_network_state'][1])
     driver.run(time_step, policy_state)
 
   if use_function:
@@ -260,3 +313,64 @@ class MultiagentMetricsGroup(tf.Module):
       for a in range(m.n_agents):
         results.append((m.name + '_agent' + str(a), m.result_for_agent(a)))
     return collections.OrderedDict(results)
+
+
+@gin.configurable
+class AverageReturnPyMetric(py_metrics.StreamingMetric):
+  """Computes the average undiscounted reward."""
+
+  def __init__(self,
+               n_agents,
+               name='MultiagentAverageReturn',
+               buffer_size=10,
+               batch_size=None):
+    """Creates an AverageReturnPyMetric."""
+    self.n_agents = n_agents
+    self._np_state = numpy_storage.NumpyState()
+    # Set a dummy value on self._np_state.episode_return so it gets included in
+    # the first checkpoint (before metric is first called).
+    self._np_state.episode_return = np.float64(0)
+    self._agent_metrics = [
+        py_metrics.AverageReturnMetric(
+            'AverageReturn%i' % i, buffer_size=buffer_size)
+        for i in range(n_agents)
+    ]
+    super(AverageReturnPyMetric, self).__init__(name, buffer_size=buffer_size,
+                                                batch_size=batch_size)
+
+  def result_for_agent(self, agent_id):
+    return self._agent_metrics[agent_id].result()
+
+  # We want to reuse methods for the sub-metrics
+  # pylint: disable=protected-access
+  def _reset(self, batch_size):
+    """Resets stat gathering variables."""
+    self._np_state.episode_return = np.zeros(
+        shape=(batch_size,), dtype=np.float64)
+    for metric in self._agent_metrics:
+      metric._reset(batch_size)
+
+  def _batched_call(self, trajectory):
+    """Processes the trajectory to update the metric.
+
+    Args:
+      trajectory: a tf_agents.trajectory.Trajectory.
+    """
+    episode_return = self._np_state.episode_return
+    agent_episode_returns = [
+        metric._np_state.episode_return for metric in self._agent_metrics
+    ]
+
+    is_first = np.where(trajectory.is_first())
+    episode_return[is_first] = 0
+    for r in agent_episode_returns:
+      r[is_first] = 0
+
+    for i in range(self.n_agents):
+      agent_episode_returns[i] += trajectory.reward[:, i]
+    episode_return += np.mean(trajectory.reward, axis=-1)
+
+    is_last = np.where(trajectory.is_last())
+    self.add_to_buffer(episode_return[is_last])
+    for metric in self._agent_metrics:
+      metric.add_to_buffer(agent_episode_returns[i][is_last])

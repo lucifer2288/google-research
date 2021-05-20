@@ -1,4 +1,4 @@
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,5 +23,7 @@ pip3 install tensorflow
 pip3 install -r social_rl/requirements.txt
 
 python3 -m social_rl.multiagent_tfagents.test_multiagent
+
+python3 -m social_rl.multiagent_tfagents.joint_attention.test_attention
 
 python3 -m social_rl.adversarial_env.test_adversarial_env

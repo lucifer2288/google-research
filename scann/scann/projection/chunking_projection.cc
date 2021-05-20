@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
 
 #include "scann/projection/chunking_projection.h"
 
+#include <cstdint>
+
 #include "absl/strings/substitute.h"
 #include "scann/projection/identity_projection.h"
 #include "scann/utils/datapoint_utils.h"
 #include "scann/utils/types.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 StatusOr<unique_ptr<ChunkingProjection<T>>> BuildFromConfigImpl(
@@ -222,5 +223,4 @@ Status ChunkingProjection<T>::ProjectInput(
 
 SCANN_INSTANTIATE_TYPED_CLASS(, ChunkingProjection);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

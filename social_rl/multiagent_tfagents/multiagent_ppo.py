@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,16 +19,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import collections
-
 from absl import logging
+
 import gin
 import numpy as np
 import tensorflow as tf  # pylint:disable=g-explicit-tensorflow-version-import
 from tf_agents.agents import tf_agent
 from tf_agents.agents.ppo import ppo_clip_agent
 from tf_agents.specs import tensor_spec
-from tf_agents.trajectories import time_step as ts_lib
+from tf_agents.trajectories import time_step as ts
 from tf_agents.trajectories import trajectory as traj_lib
 
 from social_rl.multiagent_tfagents import multiagent_ppo_policy
@@ -39,43 +38,48 @@ from social_rl.multiagent_tfagents import multigrid_networks
 class MultiagentPPO(tf_agent.TFAgent):
   """A PPO Agent implementing the clipped probability ratios."""
 
-  def __init__(self,
-               time_step_spec,
-               action_spec,
-               # Specific to multi-agent case
-               n_agents,
-               learning_rate=1e-4,
-               # Specific to multi-grid agents
-               actor_fc_layers=(32, 32),
-               value_fc_layers=(32, 32),
-               lstm_size=(128,),
-               conv_filters=8,
-               conv_kernel=3,
-               direction_fc=5,
-               # Modifying agents
-               inactive_agent_ids=None,
-               # PPO Clip agent params
-               importance_ratio_clipping=0.0,
-               lambda_value=0.95,
-               discount_factor=0.99,
-               entropy_regularization=0.05,
-               policy_l2_reg=0.0,
-               value_function_l2_reg=0.0,
-               shared_vars_l2_reg=0.0,
-               value_pred_loss_coef=0.5,
-               num_epochs=25,
-               use_gae=False,
-               use_td_lambda_return=False,
-               normalize_rewards=True,
-               reward_norm_clipping=10.0,
-               normalize_observations=True,
-               log_prob_clipping=0.0,
-               gradient_clipping=None,
-               check_numerics=False,
-               debug_summaries=False,
-               summarize_grads_and_vars=False,
-               train_step_counter=None,
-               name='MultiagentPPO'):
+  def __init__(
+      self,
+      time_step_spec,
+      action_spec,
+      # Specific to multi-agent case
+      n_agents,
+      learning_rate=1e-4,
+      # Specific to multi-grid agents
+      actor_fc_layers=(32, 32),
+      value_fc_layers=(32, 32),
+      lstm_size=(128,),
+      conv_filters=8,
+      conv_kernel=3,
+      direction_fc=5,
+      # Modifying agents
+      inactive_agent_ids=tuple(),
+      non_learning_agents=tuple(),
+      # PPO Clip agent params
+      importance_ratio_clipping=0.0,
+      lambda_value=0.95,
+      discount_factor=0.99,
+      entropy_regularization=0.05,
+      policy_l2_reg=0.0,
+      value_function_l2_reg=0.0,
+      shared_vars_l2_reg=0.0,
+      value_pred_loss_coef=0.5,
+      num_epochs=25,
+      use_gae=False,
+      use_td_lambda_return=False,
+      normalize_rewards=True,
+      reward_norm_clipping=10.0,
+      normalize_observations=True,
+      log_prob_clipping=0.0,
+      gradient_clipping=None,
+      check_numerics=False,
+      debug_summaries=False,
+      summarize_grads_and_vars=False,
+      train_step_counter=None,
+      network_build_fn=multigrid_networks.construct_multigrid_networks,
+      policy_class=multiagent_ppo_policy.MultiagentPPOPolicy,
+      agent_class=ppo_clip_agent.PPOClipAgent,
+      name='MultiagentPPO'):
     """Creates a centralized controller agent that creates several PPO Agents.
 
     Note that all architecture params apply to each of the sub-agents created.
@@ -94,6 +98,8 @@ class MultiagentPPO(tf_agent.TFAgent):
         direction to the main LSTM.
       inactive_agent_ids: Integer IDs of agents who will not train or act in the
         environment, but will simply return a no-op action.
+      non_learning_agents: Integer IDs of agents who will not train, but still
+        act in the environment.
       importance_ratio_clipping: Epsilon in clipped, surrogate PPO objective.
         For more detail, see explanation at the top of the doc.
       lambda_value: Lambda parameter for TD-lambda computation.
@@ -102,7 +108,7 @@ class MultiagentPPO(tf_agent.TFAgent):
       policy_l2_reg: Coefficient for l2 regularization of unshared policy
         weights.
       value_function_l2_reg: Coefficient for l2 regularization of unshared value
-       function weights.
+        function weights.
       shared_vars_l2_reg: Coefficient for l2 regularization of weights shared
         between the policy and value functions.
       value_pred_loss_coef: Multiplier for value prediction loss to balance with
@@ -128,6 +134,9 @@ class MultiagentPPO(tf_agent.TFAgent):
       summarize_grads_and_vars: If true, gradient summaries will be written.
       train_step_counter: An optional counter to increment every time the train
         op is run.  Defaults to the global_step.
+      network_build_fn: Function for constructing agent encoding architecture.
+      policy_class: Function for creating individual agent policies.
+      agent_class: Function for creating individual agents.
       name: The name of this agent. All variables in this module will fall under
         that name. Defaults to the class name.
 
@@ -136,6 +145,7 @@ class MultiagentPPO(tf_agent.TFAgent):
     """
     self.n_agents = n_agents
     self.inactive_agent_ids = inactive_agent_ids
+    self.non_learning_agents = non_learning_agents
 
     # Get single-agent specs
     (single_obs_spec, single_time_step_spec,
@@ -151,14 +161,18 @@ class MultiagentPPO(tf_agent.TFAgent):
             learning_rate=learning_rate)
 
         # Build actor and critic networks
-        actor_net, value_net = multigrid_networks.construct_multigrid_networks(
-            single_obs_spec, single_action_spec,
-            actor_fc_layers=actor_fc_layers, value_fc_layers=value_fc_layers,
-            lstm_size=lstm_size, conv_filters=conv_filters,
-            conv_kernel=conv_kernel, scalar_fc=direction_fc)
+        actor_net, value_net = network_build_fn(
+            single_obs_spec,
+            single_action_spec,
+            actor_fc_layers=actor_fc_layers,
+            value_fc_layers=value_fc_layers,
+            lstm_size=lstm_size,
+            conv_filters=conv_filters,
+            conv_kernel=conv_kernel,
+            scalar_fc=direction_fc)
 
         logging.info('Creating agent %d...', agent_id)
-        self.agents[agent_id] = ppo_clip_agent.PPOClipAgent(
+        self.agents[agent_id] = agent_class(
             single_time_step_spec,
             single_action_spec,
             self.optimizers[agent_id],
@@ -179,7 +193,7 @@ class MultiagentPPO(tf_agent.TFAgent):
     with tf.name_scope('meta_agent'):
       # Initialize policies
       self._policies = [self.agents[a].policy for a in range(self.n_agents)]
-      policy = multiagent_ppo_policy.MultiagentPPOPolicy(
+      policy = policy_class(
           self._policies,
           time_step_spec=time_step_spec,
           action_spec=action_spec,
@@ -187,9 +201,10 @@ class MultiagentPPO(tf_agent.TFAgent):
           collect=False,
           inactive_agent_ids=inactive_agent_ids)
 
-      self._collect_policies = [self.agents[a].collect_policy
-                                for a in range(self.n_agents)]
-      collect_policy = multiagent_ppo_policy.MultiagentPPOPolicy(
+      self._collect_policies = [
+          self.agents[a].collect_policy for a in range(self.n_agents)
+      ]
+      collect_policy = policy_class(
           self._collect_policies,
           time_step_spec=time_step_spec,
           action_spec=action_spec,
@@ -207,31 +222,33 @@ class MultiagentPPO(tf_agent.TFAgent):
           summarize_grads_and_vars=summarize_grads_and_vars,
           train_step_counter=train_step_counter)
 
+    self._global_step = train_step_counter
+    self.update_normalizers_in_train = False
     print('Finished constructing multi-agent PPO')
 
   def get_single_agent_specs(self, time_step_spec, action_spec):
     """Get single agent version of environment specs to feed to baby agents."""
-    single_obs_spec = collections.OrderedDict()
-    for k in time_step_spec.observation.keys():
-      if k == 'direction':
-        shape = [1]
-      elif k == 'image':
-        # Remove agent dimension
-        shape = time_step_spec.observation[k].shape[1:]
+
+    def make_single_agent_spec(spec):
+      if len(spec.shape) == 1:
+        shape = 1
       else:
-        # Additional control fields like 'reward', and 'done' should not be sent
-        # to individual agents
-        continue
-      single_obs_spec[k] = tensor_spec.BoundedTensorSpec(
-          shape=shape, name=time_step_spec.observation[k].name,
-          minimum=time_step_spec.observation[k].minimum,
-          maximum=time_step_spec.observation[k].maximum,
-          dtype=time_step_spec.observation[k].dtype)
+        shape = spec.shape[1:]
+      return tensor_spec.BoundedTensorSpec(
+          shape=shape,
+          name=spec.name,
+          minimum=spec.minimum,
+          maximum=spec.maximum,
+          dtype=spec.dtype)
+
+    single_obs_spec = tf.nest.map_structure(make_single_agent_spec,
+                                            time_step_spec.observation)
     single_reward_spec = tensor_spec.TensorSpec(
         shape=(), dtype=time_step_spec.reward.dtype, name='reward')
-    single_time_step_spec = ts_lib.TimeStep(
-        time_step_spec.step_type, single_reward_spec,
-        time_step_spec.discount, single_obs_spec)
+    single_time_step_spec = ts.TimeStep(time_step_spec.step_type,
+                                        single_reward_spec,
+                                        time_step_spec.discount,
+                                        single_obs_spec)
     single_action_spec = action_spec[0]
     return single_obs_spec, single_time_step_spec, single_action_spec
 
@@ -258,14 +275,15 @@ class MultiagentPPO(tf_agent.TFAgent):
     reward = trajectory.reward[:, :, agent_id]
     policy_info = trajectory.policy_info[agent_id]
 
-    # Remake observation while discarding reward, done, and active
-    observation = collections.OrderedDict()
-    observation['image'] = \
-        trajectory.observation['image'][:, :, agent_id, :, :, :]
-    # Expand dims is needed here because tf-agents cannot allow an observation
-    # component to have shape=()
-    observation['direction'] = tf.expand_dims(
-        trajectory.observation['direction'][:, :, agent_id], 2)
+    def get_single_observation(observation):
+      if len(observation.shape) == 3:
+        # Need at least one additional dim besides batch
+        return tf.expand_dims(observation[:, :, agent_id], 2)
+      else:
+        return observation[:, :, agent_id]
+
+    observation = tf.nest.map_structure(get_single_observation,
+                                        trajectory.observation)
 
     agent_trajectory = traj_lib.Trajectory(
         step_type=trajectory.step_type,
@@ -283,7 +301,10 @@ class MultiagentPPO(tf_agent.TFAgent):
     agent_losses = []
     for a in range(self.n_agents):
       # Fixed agents do not train
-      if self.inactive_agent_ids and a in self.inactive_agent_ids:
+      if a in self.inactive_agent_ids:
+        continue
+      if a in self.non_learning_agents:
+        agent_losses.append(tf_agent.LossInfo(loss=0, extra=None))
         continue
 
       agent_experience = self.extract_single_agent_trajectory(a, experience)

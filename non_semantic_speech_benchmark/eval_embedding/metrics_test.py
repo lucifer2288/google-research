@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -56,6 +56,9 @@ class MetricsTest(parameterized.TestCase):
     metrics.dprime_from_auc(auc)
     auc = metrics.calculate_auc([0, 0, 1, 1], [0.9, 0.8, 0.2, 0.1])
     metrics.dprime_from_auc(auc)
+
+  def testBalancedAccuracySanity(self):
+    metrics.balanced_accuracy([0, 0, 1, 1, 0], [0, 1, 0, 1, 1])
 
 
 if __name__ == '__main__':

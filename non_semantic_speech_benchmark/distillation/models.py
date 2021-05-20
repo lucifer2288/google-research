@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,46 +13,165 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Lint as: python3
 """Models for distillation."""
 
 import tensorflow as tf
+import tensorflow_model_optimization as tfmot
+from non_semantic_speech_benchmark.distillation.layers import CompressedDense
 from non_semantic_speech_benchmark.export_model import tf_frontend
+# pylint: disable=g-direct-tensorflow-import
+from tensorflow.python.keras.applications import mobilenet_v3 as v3_util
+# pylint: enable=g-direct-tensorflow-import
 
 
 @tf.function
-def _sample_to_features(x):
-  return tf_frontend.compute_frontend_features(x, 16000, overlap_seconds=79)
+def _sample_to_features(x, tflite):
+  return tf_frontend.compute_frontend_features(
+      x, 16000, overlap_seconds=79, tflite=tflite)
 
 
-def get_keras_model(bottleneck_dimension, output_dimension, alpha=1.0):
-  """Make a model."""
-  audio_tensor = tf.keras.Input((None,))
-  def _map_fn_lambda(x):
-    return tf.map_fn(_sample_to_features, x, dtype=tf.float64)
-  feats = tf.keras.layers.Lambda(_map_fn_lambda)(audio_tensor)
-  feats.shape.assert_is_compatible_with([None, None, 96, 64])
-  feats = tf.transpose(feats, [0, 2, 1, 3])
-  feats = tf.reshape(feats, [-1, 96, 64, 1])
-  model = tf.keras.applications.MobileNetV3Large(
+def _get_feats_map_fn(tflite):
+  """Returns a function mapping audio to features, suitable for keras Lambda."""
+  if tflite:
+    def feats_map_fn(x):
+      return _sample_to_features(x, tflite=True)
+  else:
+    def feats_map_fn(x):
+      return tf.map_fn(
+          lambda y: _sample_to_features(y, tflite=False), x, dtype=tf.float64)
+  return feats_map_fn
+
+
+def get_keras_model(bottleneck_dimension,
+                    output_dimension,
+                    alpha=1.0,
+                    mobilenet_size='small',
+                    frontend=True,
+                    avg_pool=False,
+                    compressor=None,
+                    quantize_aware_training=False,
+                    tflite=False):
+  """Make a Keras student model."""
+  output_dict = {}  # Dictionary of model outputs.
+
+  def _map_mobilenet_func(mnet_size):
+    mnet_size_map = {
+        'tiny': mobilenetv3_tiny,
+        'small': tf.keras.applications.MobileNetV3Small,
+        'large': tf.keras.applications.MobileNetV3Large,
+    }
+    if mnet_size.lower() not in mnet_size_map:
+      raise ValueError('Unknown MobileNet size %s.' % mnet_size)
+    return mnet_size_map[mnet_size.lower()]
+
+  # TFLite use-cases usually use non-batched inference, and this also enables
+  # hardware acceleration.
+  num_batches = 1 if tflite else None
+  if frontend:
+    model_in = tf.keras.Input((None,), name='audio_samples',
+                              batch_size=num_batches)
+    feats = tf.keras.layers.Lambda(_get_feats_map_fn(tflite))(model_in)
+    feats.shape.assert_is_compatible_with([None, None, 96, 64])
+    feats = tf.transpose(feats, [0, 2, 1, 3])
+    feats = tf.reshape(feats, [-1, 96, 64, 1])
+  else:
+    model_in = tf.keras.Input((96, 64, 1),
+                              name='log_mel_spectrogram')
+    feats = model_in
+  inputs = [model_in]
+
+  model = _map_mobilenet_func(mobilenet_size)(
       input_shape=[96, 64, 1],
       alpha=alpha,
       minimalistic=False,
       include_top=False,
       weights=None,
-      pooling=None,
+      pooling='avg' if avg_pool else None,
       dropout_rate=0.0)
   model_out = model(feats)
-  model_out.shape.assert_is_compatible_with([None, 3, 2, 1280])
-  embeddings = tf.keras.backend.batch_flatten(model_out)
-  embeddings.set_shape([None, 3 * 2 * 1280])
-  # TODO(joelshor): These final layers can be large. Investigate the compression
-  # techniques described in
-  # https://blog.tensorflow.org/2020/02/matrix-compression-operator-tensorflow.html?m=1
-  embeddings = tf.keras.layers.Dense(
-      bottleneck_dimension, name='distilled_output')(embeddings)
-  output = tf.keras.layers.Dense(
-      output_dimension, name='embedding_to_target')(embeddings)
+  if avg_pool:
+    model_out.shape.assert_is_compatible_with([None, None])
+  else:
+    model_out.shape.assert_is_compatible_with([None, 1, 1, None])
+  if bottleneck_dimension:
+    if compressor is not None:
+      bottleneck = CompressedDense(
+          bottleneck_dimension,
+          compression_obj=compressor,
+          name='distilled_output')
+    else:
+      bottleneck = tf.keras.layers.Dense(
+          bottleneck_dimension, name='distilled_output')
+      if quantize_aware_training:
+        bottleneck = tfmot.quantization.keras.quantize_annotate_layer(
+            bottleneck)
+    embeddings = tf.keras.layers.Flatten()(model_out)
+    embeddings = bottleneck(embeddings)
+  else:
+    embeddings = tf.keras.layers.Flatten(name='distilled_output')(model_out)
 
-  model = tf.keras.Model(inputs=audio_tensor, outputs=output)
+  # Construct optional final layer, and create output dictionary.
+  output_dict['embedding'] = embeddings
+  if output_dimension:
+    output = tf.keras.layers.Dense(
+        output_dimension, name='embedding_to_target')(embeddings)
+    output_dict['embedding_to_target'] = output
+  output_model = tf.keras.Model(inputs=inputs, outputs=output_dict)
 
-  return model
+  # Optional modifications to the model for TFLite.
+  if tflite:
+    if compressor is not None:
+      # If model employs compression, this ensures that the TFLite model
+      # just uses the smaller matrices for inference.
+      output_model.get_layer('distilled_output').kernel = None
+      output_model.get_layer(
+          'distilled_output').compression_op.a_matrix_tfvar = None
+
+  return output_model
+
+
+def mobilenetv3_tiny(input_shape=None,
+                     alpha=1.0,
+                     minimalistic=False,
+                     include_top=True,
+                     weights='imagenet',
+                     input_tensor=None,
+                     classes=1000,
+                     pooling=None,
+                     dropout_rate=0.2,
+                     classifier_activation='softmax'):
+  """Makes MobileNetV3 model."""
+
+  def stack_fn(x, kernel, activation, se_ratio):
+
+    # Using blocks from MobileNetV3 saves a lot of code duplication.
+    # pylint: disable=protected-access
+    def depth(d):
+      return v3_util._depth(d * alpha)
+
+    x = v3_util._inverted_res_block(x, 1, depth(16), 3, 2, se_ratio,
+                                    v3_util.relu, 0)
+    x = v3_util._inverted_res_block(x, 72. / 16, depth(24), 3, 2, None,
+                                    v3_util.relu, 1)
+    x = v3_util._inverted_res_block(x, 88. / 24, depth(24), 3, 1, None,
+                                    v3_util.relu, 2)
+    x = v3_util._inverted_res_block(x, 4, depth(40), kernel, 2, se_ratio,
+                                    activation, 3)
+    x = v3_util._inverted_res_block(x, 6, depth(40), kernel, 1, se_ratio,
+                                    activation, 4)
+    x = v3_util._inverted_res_block(x, 6, depth(40), kernel, 1, se_ratio,
+                                    activation, 5)
+    x = v3_util._inverted_res_block(x, 3, depth(48), kernel, 1, se_ratio,
+                                    activation, 6)
+    x = v3_util._inverted_res_block(x, 6, depth(96), kernel, 2, se_ratio,
+                                    activation, 8)
+    x = v3_util._inverted_res_block(x, 6, depth(96), kernel, 1, se_ratio,
+                                    activation, 9)
+    # pylint: enable=protected-access
+    return x
+
+  return v3_util.MobileNetV3(stack_fn, 512, input_shape, alpha, 'tiny',
+                             minimalistic, include_top, weights, input_tensor,
+                             classes, pooling, dropout_rate,
+                             classifier_activation)

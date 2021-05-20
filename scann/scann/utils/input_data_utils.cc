@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
 
 #include "scann/utils/input_data_utils.h"
 
+#include <cstdint>
+
 #include "scann/proto/projection.pb.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 StatusOr<DatapointIndex> ComputeConsistentNumPointsFromIndex(
     const Dataset* dataset, const DenseDataset<uint8_t>* hashed_dataset,
     const PreQuantizedFixedPoint* pre_quantized_fixed_point,
-    const DenseDataset<uint8_t>* compressed_dataset,
     const vector<int64_t>* crowding_attributes) {
   if (!dataset && !hashed_dataset && !pre_quantized_fixed_point) {
     return InvalidArgumentError(
@@ -55,17 +55,6 @@ StatusOr<DatapointIndex> ComputeConsistentNumPointsFromIndex(
     }
   }
 
-  if (compressed_dataset) {
-    if (sz == kInvalidDatapointIndex) {
-      sz = compressed_dataset->size();
-    } else {
-      SCANN_RET_CHECK_EQ(sz, compressed_dataset->size())
-              .SetErrorCode(error::INVALID_ARGUMENT)
-          << "Mismatch between original/hashed/fixed-point database and "
-             "compressed database sizes.";
-    }
-  }
-
   if (crowding_attributes && !crowding_attributes->empty() &&
       sz != kInvalidDatapointIndex) {
     SCANN_RET_CHECK_EQ(crowding_attributes->size(), sz);
@@ -79,8 +68,7 @@ StatusOr<DatapointIndex> ComputeConsistentNumPointsFromIndex(
 StatusOr<DimensionIndex> ComputeConsistentDimensionalityFromIndex(
     const HashConfig& config, const Dataset* dataset,
     const DenseDataset<uint8_t>* hashed_dataset,
-    const PreQuantizedFixedPoint* pre_quantized_fixed_point,
-    const DenseDataset<uint8_t>* compressed_dataset) {
+    const PreQuantizedFixedPoint* pre_quantized_fixed_point) {
   if (!dataset && !hashed_dataset && !pre_quantized_fixed_point) {
     return InvalidArgumentError(
         "dataset, hashed_dataset and pre_quantized_fixed_point are all null.");
@@ -129,5 +117,4 @@ StatusOr<DimensionIndex> ComputeConsistentDimensionalityFromIndex(
   return dims;
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

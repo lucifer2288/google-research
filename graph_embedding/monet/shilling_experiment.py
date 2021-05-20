@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import numpy
 from scipy.stats import pearsonr
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import scale
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 # User-defined hyperparameters for the experiment.
 DATA_FILE = 'movielens/ml-100k/u.data'

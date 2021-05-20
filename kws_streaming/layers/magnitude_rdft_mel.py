@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -75,11 +75,8 @@ class MagnitudeRDFTmel(magnitude_rdft.MagnitudeRDFT):
 
   def build(self, input_shape):
 
-    # this is the feature size of the DFT output
-    feature_size = int(input_shape[-1])
-    if self.use_tf_fft:
-      # this is the feature size of the TF RFFT output
-      feature_size = self._compute_fft_size(feature_size) // 2 + 1
+    # output size of DFT
+    feature_size = self._compute_fft_size(int(input_shape[-1])) // 2 + 1
 
     # precompute mel matrix using np
     self.mel_weight_matrix = mel_table.SpectrogramToMelMatrix(

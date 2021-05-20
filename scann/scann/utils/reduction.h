@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,19 @@
 
 
 
-#ifndef SCANN__UTILS_REDUCTION_H_
-#define SCANN__UTILS_REDUCTION_H_
+#ifndef SCANN_UTILS_REDUCTION_H_
+#define SCANN_UTILS_REDUCTION_H_
 
 #include <sys/types.h>
+
+#include <cstdint>
 
 #include "scann/data_format/datapoint.h"
 #include "scann/oss_wrappers/scann_aligned_malloc.h"
 #include "scann/utils/types.h"
 #include "tensorflow/core/platform/prefetch.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T, typename U, typename Reduce>
 auto DensePairAccumulate(T* a, U* b, size_t size, Reduce reduce)
@@ -392,7 +393,6 @@ struct DoNothingReduce {
   bool IsNoop() { return true; }
 };
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

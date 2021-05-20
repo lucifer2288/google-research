@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#!/usr/bin/env python
 """Dummy Agent."""
 
 import os
@@ -81,7 +82,7 @@ class DummyAgent:
     p0_position = (self.bounds[:, 1] - self.bounds[:, 0]) / 2
     p0_position += self.bounds[:, 0]
     p1_position = p0_position
-    rotation = utils.get_pybullet_quaternion_from_rot((0, 0, 0))
+    rotation = utils.eulerXYZ_to_quatXYZW((0, 0, 0))
 
     # Select task-specific motion primitive.
     act['primitive'] = 'pick_place'

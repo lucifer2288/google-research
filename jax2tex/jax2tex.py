@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -526,6 +526,29 @@ def get_dependencies(expr: ASTNode) -> MaybeEmptyTuple[Variable]:
 op2tex = {}
 op2ind = {}
 
+NEEDS_EXPLICIT_PARENTHESES = [
+    lax.add_p,
+    lax.sub_p,
+    lax.neg_p,
+    lax.reduce_sum_p,
+]
+
+MAYBE_NEEDS_EXPLICIT_PARENTHESES = [
+    lax.broadcast_in_dim_p
+]
+
+
+def prim_needs_explicit_parentheses(node: BoundTExpr) -> bool:
+  """Check whether a node needs parantheses to make sense when multiplied."""
+  if node.prim in NEEDS_EXPLICIT_PARENTHESES:
+    return True
+
+  if node.prim in MAYBE_NEEDS_EXPLICIT_PARENTHESES:
+    assert len(node.in_vars) == 1
+    return prim_needs_explicit_parentheses(node.in_ast_nodes[0])
+
+  return False
+
 
 def broadcast2ind(
     in_shaped: Tuple[ShapedArray, ...], out_indices: str, _: str) -> Tuple[str]:
@@ -560,9 +583,9 @@ op2ind[lax.sub_p] = broadcast2ind
 
 
 def mul2tex(a: BoundASTNode, b: BoundASTNode) -> str:
-  if hasattr(a, 'prim') and a.prim in (lax.add_p, lax.sub_p):
+  if hasattr(a, 'prim') and prim_needs_explicit_parentheses(a):
     a = f'\\left({a}\\right)'
-  if hasattr(b, 'prim') and b.prim in (lax.add_p, lax.sub_p):
+  if hasattr(b, 'prim') and prim_needs_explicit_parentheses(b):
     b = f'\\left({b}\\right)'
   return f'{a}{b}'
 op2tex[lax.mul_p] = mul2tex
@@ -578,9 +601,10 @@ op2ind[lax.div_p] = broadcast2ind
 def dot_general2tex(a: BoundASTNode,
                     b: BoundASTNode,
                     dimension_numbers: lax.DotDimensionNumbers,
-                    precision) -> str:
+                    precision,
+                    preferred_element_type) -> str:
   """Converts dot_general op to latex."""
-  del precision
+  del precision, preferred_element_type
 
   ((a_contract_dims, _),
    (a_broadcast_dims, _)) = dimension_numbers
@@ -611,9 +635,10 @@ def dot_general2ind(in_shaped: Tuple[ShapedArray, ...],
                     out_indices: str,
                     out_used: str,
                     dimension_numbers: lax.DotDimensionNumbers,
-                    precision) -> Tuple[str, ...]:
+                    precision,
+                    preferred_element_type) -> Tuple[str, ...]:
   """Computes indices of inputs given indices of outputs for dot_general."""
-  del precision
+  del precision, preferred_element_type
 
   ((a_contract_dims, b_contract_dims), _) = dimension_numbers
   a, b = in_shaped
@@ -696,13 +721,6 @@ op2tex[xla.device_put_p] = noop2tex
 op2ind[xla.device_put_p] = noop2ind
 op2tex[jax.ad_util.stop_gradient_p] = noop2tex
 op2ind[jax.ad_util.stop_gradient_p] = noop2ind
-
-if hasattr(lax, 'tie_in_p'):
-  tie_in2tex = lambda x, y: y
-  tie_in2ind = lambda in_shaped, out_indices, out_used: (None, out_indices)
-  op2tex[lax.tie_in_p] = tie_in2tex
-  op2ind[lax.tie_in_p] = tie_in2ind
-
 
 op2tex[lax.sqrt_p] = lambda x: '\\sqrt{' + str(x) + '}'
 op2ind[lax.sqrt_p] = noop2ind
@@ -911,9 +929,11 @@ op2tex[lax.reshape_p] = reshape2tex
 
 def reshape2ind(in_shaped: Tuple[ShapedArray, ...],
                 out_indices: str,
+                out_used: str,
                 new_sizes,
                 dimensions) -> Tuple[str, ...]:
   """Computes indices of inputs given indices of outputs for reshape."""
+  del out_used
   x, = in_shaped
   assert not dimensions
 

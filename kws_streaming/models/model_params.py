@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -79,6 +79,10 @@ class Params(object):
     self.sp_resample = 0.0
     self.pick_deterministically = 0
     self.verbosity = logging.INFO
+    self.causal_data_frame_padding = 0
+    self.wav = 1
+    self.data_stride = 1
+    self.quantize = 0
 
 
 def att_mh_rnn_params():
@@ -162,6 +166,7 @@ def cnn_stride_params():
   params.dropout1 = 0.5
   params.units2 = '4,4'
   params.act2 = "'linear','relu'"
+  params.data_stride = 2
   return params
 
 
@@ -247,6 +252,7 @@ def ds_cnn_params():
   params.cnn2_filters = '4,4'
   params.cnn2_act = "'relu','relu'"
   params.dropout1 = 0.2
+  params.data_stride = 2
   return params
 
 
@@ -294,6 +300,7 @@ def mobilenet_v2_params():
   params.cnn_expansions = '1.5,1.5'
   params.dropout = 0.2
   params.bn_scale = 0
+  params.data_stride = 2
   return params
 
 
@@ -389,7 +396,6 @@ def ds_tc_resnet_params():
   params.ds_kernel_size = '3, 1'
   params.ds_stride = '1, 1'
   params.ds_dilation = '2, 1'
-  params.activation = 'relu'
   params.ds_pool = '1,1'
   params.ds_scale = 1
   params.ds_filter_separable = '1,1'

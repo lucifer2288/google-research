@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,12 @@
 
 #include "scann/partitioning/partitioner_factory.h"
 
+#include <cstdint>
 #include <memory>
 
 #include "absl/memory/memory.h"
 #include "absl/numeric/int128.h"
+#include "absl/strings/match.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "scann/distance_measures/distance_measure_factory.h"
@@ -34,8 +36,7 @@
 #include "scann/utils/weak_ptr_cache.h"
 #include "tensorflow/core/lib/core/errors.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 StatusOr<unique_ptr<Partitioner<T>>> PartitionerFromSerializedImpl(
@@ -135,7 +136,7 @@ StatusOr<unique_ptr<Partitioner<T>>> PartitionerFromKMeansTree(
     SCANN_RETURN_IF_ERROR(
         km->CreateAsymmetricHashingSearcherForQueryTokenization());
     km->SetQueryTokenizationType(
-        tensorflow::scann_ops::KMeansTreePartitioner<T>::ASYMMETRIC_HASHING);
+        research_scann::KMeansTreePartitioner<T>::ASYMMETRIC_HASHING);
   }
 
   if (config.database_tokenization_type() == PartitioningConfig::FLOAT) {
@@ -148,7 +149,7 @@ StatusOr<unique_ptr<Partitioner<T>>> PartitionerFromKMeansTree(
     SCANN_RETURN_IF_ERROR(
         km->CreateAsymmetricHashingSearcherForDatabaseTokenization());
     km->SetDatabaseTokenizationType(
-        tensorflow::scann_ops::KMeansTreePartitioner<T>::ASYMMETRIC_HASHING);
+        research_scann::KMeansTreePartitioner<T>::ASYMMETRIC_HASHING);
   }
 
   if (config.compute_residual_stdev()) {
@@ -169,5 +170,4 @@ SCANN_INSTANTIATE_SERIALIZED_PARTITIONER_FACTORY(, uint64_t);
 SCANN_INSTANTIATE_SERIALIZED_PARTITIONER_FACTORY(, float);
 SCANN_INSTANTIATE_SERIALIZED_PARTITIONER_FACTORY(, double);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

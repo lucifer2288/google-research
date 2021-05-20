@@ -39,6 +39,7 @@ source ./venv3/bin/activate
 pip install --upgrade pip
 pip install tf_nightly==2.4.0-dev20200917
 pip install tensorflow_addons
+pip install tensorflow_model_optimization
 # was tested on tf_nightly-2.3.0.dev20200515-cp36-cp36m-manylinux2010_x86_64.whl
 
 # install libs:
@@ -68,12 +69,11 @@ cd ../
 DATA_PATH=$KWS_PATH/data2
 ```
 
-## Set pre trained models:
+## Set path to models:
 
 ```shell
-# download and set up path to models trained and evaluated on data sets V2
-wget https://storage.googleapis.com/kws_models/models2_30k.zip
-unzip ./models2_30k.zip
+# set up path for model training
+mkdir $KWS_PATH/models2_30k
 
 # models trained on data V2
 MODELS_PATH=$KWS_PATH/models2_30k
@@ -97,7 +97,7 @@ After all of these, main folder KWS_PATH should have several subfolders:
 
 ## Models training and evaluation:
 
-Now we can run below commands with "--train 0" which will evaluate the model and produce accuracy report with TFLite modules. If you would like to re-train model from scratch then you should: set "--train 0" and remove model subfolder inside of $MODELS_PATH
+If your model is already trained then you can specify "--train 0" which will evaluate the model and produce an accuracy report with TFLite modules. If you would like to re-train model from scratch then you should: set "--train 1" and remove model subfolder inside of $MODELS_PATH
 
 There are two options of running python script. One with bazel and another by calling python directly shown below:
 ```shell
@@ -115,7 +115,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/svdf_resnet/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -125,6 +125,7 @@ $CMD_TRAIN \
 --resample 0.15 \
 --time_shift_ms 100 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 --train 1 \
 --lr_schedule 'exp' \
@@ -156,7 +157,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/mobilenet/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -166,6 +167,7 @@ $CMD_TRAIN \
 --resample 0.15 \
 --time_shift_ms 100 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 --train 1 \
 --lr_schedule 'exp' \
@@ -189,7 +191,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/mobilenet_v2/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -200,6 +202,7 @@ $CMD_TRAIN \
 --time_shift_ms 100 \
 --train 1 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 mobilenet_v2 \
 --cnn1_filters 32 \
@@ -222,7 +225,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/inception/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -233,6 +236,7 @@ $CMD_TRAIN \
 --time_shift_ms 100 \
 --train 1 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 inception \
 --cnn1_filters '32' \
@@ -255,7 +259,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/inception_resnet/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -266,6 +270,7 @@ $CMD_TRAIN \
 --time_shift_ms 100 \
 --train 1 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 inception_resnet \
 --cnn1_filters '32' \
@@ -290,7 +295,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/svdf/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -300,6 +305,7 @@ $CMD_TRAIN \
 --resample 0.15 \
 --time_shift_ms 100 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 --train 1 \
 --lr_schedule 'exp' \
@@ -325,7 +331,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/tc_resnet/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -336,6 +342,7 @@ $CMD_TRAIN \
 --time_shift_ms 100 \
 --train 1 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 tc_resnet \
 --kernel_size '(3,1)' \
@@ -359,7 +366,7 @@ $CMD_TRAIN \
 --data_url '' \
 --data_dir $DATA_PATH/ \
 --train_dir $MODELS_PATH/xception/ \
---mel_upper_edge_hertz 7000 \
+--mel_upper_edge_hertz 7600 \
 --how_many_training_steps 20000,20000,20000,20000 \
 --learning_rate 0.001,0.0005,0.0001,0.00002 \
 --window_size_ms 40.0 \
@@ -370,6 +377,7 @@ $CMD_TRAIN \
 --time_shift_ms 100 \
 --train 1 \
 --feature_type 'mfcc_op' \
+--fft_magnitude_squared 1 \
 --preprocess 'raw' \
 xception \
 --cnn1_kernel_size '5' \

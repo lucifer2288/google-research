@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 import tensorflow_hub as hub
 from non_semantic_speech_benchmark import file_utils
+from non_semantic_speech_benchmark.export_model import tf_frontend
 
 
 def _tfexample_audio_to_npfloat32(ex, audio_key):
@@ -55,14 +56,17 @@ def _tfexample_audio_to_npfloat32(ex, audio_key):
   return audio
 
 
-def _samples_to_embedding_tfhub(audio_samples, sample_rate, mod, output_key):
+def _samples_to_embedding_tfhub(model_input, sample_rate, mod, output_key):
   """Run inference to map audio samples to an embedding."""
-  tf_out = mod(tf.constant(audio_samples, tf.float32),
-               tf.constant(sample_rate, tf.int32))
+  # Models either take 2 args (input, sample_rate) or 1 arg (input). Try both.
+  try:
+    tf_out = mod(model_input, sample_rate)
+  except ValueError:
+    tf_out = mod(model_input)
   return np.array(tf_out[output_key])
 
 
-def _build_tflite_interpreter(tflite_model_path):
+def build_tflite_interpreter(tflite_model_path):
   model_content = None
   with tf.io.gfile.GFile(tflite_model_path, 'rb') as model_file:
     model_content = model_file.read()
@@ -71,20 +75,30 @@ def _build_tflite_interpreter(tflite_model_path):
   return interpreter
 
 
-def _samples_to_embedding_tflite(
-    audio_samples, sample_rate, interpreter, output_key):
+def _default_feature_fn(samples, sample_rate):
+  return tf.expand_dims(
+      tf_frontend.compute_frontend_features(
+          samples, sample_rate, overlap_seconds=79),
+      axis=-1).numpy().astype(np.float32)
+
+
+def samples_to_embedding_tflite(model_input, sample_rate, interpreter,
+                                output_key):
   """Run TFLite inference to map audio samples to an embedding."""
   input_details = interpreter.get_input_details()
   output_details = interpreter.get_output_details()
   # Resize TFLite input size based on length of sample.
   # Ideally, we should explore if we can use fixed-size input here, and
   # tile the sample to meet TFLite input size.
-  interpreter.resize_tensor_input(input_details[0]['index'],
-                                  [len(audio_samples)])
+  logging.info('TFLite input, actual vs expected: %s vs %s', model_input.shape,
+               input_details[0]['shape'])
+  interpreter.resize_tensor_input(input_details[0]['index'], model_input.shape)
   interpreter.allocate_tensors()
-  interpreter.set_tensor(input_details[0]['index'], audio_samples)
-  interpreter.set_tensor(input_details[1]['index'],
-                         np.array(sample_rate).astype(np.int32))
+  interpreter.set_tensor(input_details[0]['index'], model_input)
+  # Models either take 2 args (input, sample_rate) or 1 arg (input). Try both.
+  if len(input_details) > 1:
+    interpreter.set_tensor(input_details[1]['index'],
+                           np.array(sample_rate).astype(np.int32))
 
   interpreter.invoke()
   embedding_2d = interpreter.get_tensor(
@@ -97,8 +111,15 @@ def _samples_to_embedding_tflite(
 class ComputeEmbeddingMapFn(beam.DoFn):
   """Computes an embedding (key, tf.Example) from audio (key, tf.Example)."""
 
-  def __init__(self, name, module, output_key, audio_key, sample_rate_key,
-               sample_rate, average_over_time):
+  def __init__(self,
+               name,
+               module,
+               output_key,
+               audio_key,
+               sample_rate_key,
+               sample_rate,
+               average_over_time,
+               feature_fn=None):
     self._name = name
     # If TFLite should be used, `module` should point to a flatbuffer model.
     self._module = module
@@ -110,6 +131,7 @@ class ComputeEmbeddingMapFn(beam.DoFn):
     self._sample_rate_key = sample_rate_key
     self._sample_rate = sample_rate
     self._average_over_time = average_over_time
+    self._feature_fn = feature_fn
 
     # Only one of `sample_rate_key` and `sample_rate` should be not None.
     assert (self._sample_rate_key is None) ^ (self._sample_rate is None),\
@@ -117,7 +139,7 @@ class ComputeEmbeddingMapFn(beam.DoFn):
 
   def setup(self):
     if self._use_tflite:
-      self.interpreter = _build_tflite_interpreter(self._module)
+      self.interpreter = build_tflite_interpreter(self._module)
     else:
       self.module = hub.load(self._module)
 
@@ -129,6 +151,7 @@ class ComputeEmbeddingMapFn(beam.DoFn):
       raise ValueError(f'Audio key `{self._audio_key}` not found: '
                        f'{list(ex.features.feature.keys())}')
     audio = _tfexample_audio_to_npfloat32(ex, self._audio_key)
+    assert audio.ndim == 1, audio.ndim
     if audio.size == 0:
       raise ValueError(f'No audio found: {self._audio_key}, {audio.size} {k}')
     beam.metrics.Metrics.distribution(
@@ -138,8 +161,16 @@ class ComputeEmbeddingMapFn(beam.DoFn):
     if self._sample_rate_key:
       if self._sample_rate_key not in ex.features.feature:
         raise ValueError(f'Sample rate key not found: {self._sample_rate_key}')
-      sample_rate = ex.features.feature[
-          self._sample_rate_key].int64_list.value[0]
+      sr_feat = ex.features.feature[self._sample_rate_key]
+      # Use `sample_rate` in `float_list` or `int64_list`. Either way, convert
+      # to an integer for downstream use.
+      if not len(sr_feat.float_list.value) ^ len(sr_feat.int64_list.value):
+        raise ValueError(
+            f'Expected exactly one of `float_list` and `int64_list`: {sr_feat}')
+      if sr_feat.float_list.value:
+        sample_rate = int(sr_feat.float_list.value[0])
+      else:
+        sample_rate = sr_feat.int64_list.value[0]
     else:
       if not self._sample_rate:
         raise ValueError('If `sample_rate_key` not provided, must provide '
@@ -154,13 +185,26 @@ class ComputeEmbeddingMapFn(beam.DoFn):
           audio, orig_sr=sample_rate, target_sr=16000, res_type='kaiser_best')
       sample_rate = 16000
 
+    # Convert audio to features, if required.
+    if self._feature_fn:
+      model_input = self._feature_fn(audio, sample_rate)
+      if not isinstance(model_input, np.ndarray):
+        raise ValueError(f'Expected ndarray, got {type(model_input)}')
+      if model_input.dtype != np.float32:
+        raise ValueError(f'Should be float32, was: {model_input.dtype}')
+    else:
+      model_input = audio
+      if self._use_tflite:
+        model_input = np.expand_dims(model_input, axis=0)
+    logging.info('`model_input` shape is: %s', model_input.shape)
+
     # Calculate the 2D embedding.
     if self._use_tflite:
-      embedding_2d = _samples_to_embedding_tflite(
-          audio, sample_rate, self.interpreter, self._output_key)
+      embedding_2d = samples_to_embedding_tflite(
+          model_input, sample_rate, self.interpreter, self._output_key)
     else:
       embedding_2d = _samples_to_embedding_tfhub(
-          audio, sample_rate, self.module, self._output_key)
+          model_input, sample_rate, self.module, self._output_key)
     assert isinstance(embedding_2d, np.ndarray)
     assert embedding_2d.ndim == 2
     assert embedding_2d.dtype == np.float32
@@ -314,7 +358,7 @@ def validate_inputs(
   assert len(embedding_names) == len(embedding_modules),\
          (embedding_names, embedding_modules)
   assert len(embedding_modules) == len(module_output_keys),\
-         (embedding_modules, module_output_keys)
+         (len(embedding_modules), len(module_output_keys))
   # Shortnames must be unique.
   assert len(set(embedding_names)) == len(embedding_names), embedding_names
 
@@ -364,7 +408,8 @@ def make_beam_pipeline(
     root, input_filenames, sample_rate, debug, embedding_names,
     embedding_modules, module_output_keys, audio_key, sample_rate_key,
     label_key, speaker_id_key, average_over_time, delete_audio_from_output,
-    output_filename, input_format='tfrecord', output_format='tfrecord',
+    output_filename, split_embeddings_into_separate_tables=False,
+    use_frontend_fn=False, input_format='tfrecord', output_format='tfrecord',
     suffix='Main'):
   """Construct beam pipeline for mapping from audio to embeddings.
 
@@ -386,6 +431,10 @@ def make_beam_pipeline(
     delete_audio_from_output: Python bool. Whether to remove audio fromm
       outputs.
     output_filename: Python string. Output filename.
+    split_embeddings_into_separate_tables: Python bool. If true, write each
+      embedding to a separate table.
+    use_frontend_fn: If `true`, call frontend fn on audio before passing to the
+      model.
     input_format: Python string. Must correspond to a function in
       `reader_functions`.
     output_format: Python string. Must correspond to a function
@@ -420,24 +469,41 @@ def make_beam_pipeline(
             audio_key=audio_key,
             sample_rate_key=sample_rate_key,
             sample_rate=sample_rate,
-            average_over_time=average_over_time))
+            average_over_time=average_over_time,
+            feature_fn=_default_feature_fn if use_frontend_fn else None))
     embedding_tables[name] = tbl
   assert tf_examples_key_ not in embedding_tables
   embedding_tables[tf_examples_key_] = input_examples
   logging.info('embedding_tables: %s', embedding_tables)
 
-  # Combine embeddings and tf.train.Example, using the common key.
-  combined_tbl = (
-      embedding_tables
-      | f'CombineEmbeddingTables-{s}' >> beam.CoGroupByKey()
-      | f'AddEmbeddings-{s}' >> beam.Map(
-          _add_embedding_column_map_fn,
-          original_example_key=tf_examples_key_,
-          delete_audio_from_output=delete_audio_from_output,
-          audio_key=audio_key,
-          label_key=label_key,
-          speaker_id_key=speaker_id_key))
+  # Either write to one table with all embeddings, or one table per embedding.
+  if split_embeddings_into_separate_tables:
+    output_table_dicts = [
+        (k, {k: v, tf_examples_key_: input_examples}) for
+        k, v in embedding_tables.items() if k != tf_examples_key_]
+  else:
+    output_table_dicts = [('all', embedding_tables)]
 
-  output_filename = f'{output_filename}@*'
-  logging.info('Writing to %s', output_filename)
-  writer_functions[output_format](combined_tbl, output_filename, s)
+  # Combine embeddings and tf.train.Example, using the common key.
+  writer_function = writer_functions[output_format]
+  for name, embedding_tables in output_table_dicts:
+    if split_embeddings_into_separate_tables:
+      cur_s = f'{name}-{s}'
+      # Add `name` as a subdir.
+      dirname, basename = os.path.split(output_filename)
+      cur_output_filename = os.path.join(dirname, name, f'{basename}@*')
+    else:
+      cur_s = s
+      cur_output_filename = f'{output_filename}@*'
+    combined_tbl = (
+        embedding_tables
+        | f'CombineEmbeddingTables-{cur_s}' >> beam.CoGroupByKey()
+        | f'AddEmbeddings-{cur_s}' >> beam.Map(
+            _add_embedding_column_map_fn,
+            original_example_key=tf_examples_key_,
+            delete_audio_from_output=delete_audio_from_output,
+            audio_key=audio_key,
+            label_key=label_key,
+            speaker_id_key=speaker_id_key))
+    logging.info('Writing to %s', cur_output_filename)
+    writer_function(combined_tbl, cur_output_filename, cur_s)

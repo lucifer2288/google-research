@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// ProtoBestPractices: ignore
 
 syntax = "proto2";
 
 package automl_zero;
 
-import "task.proto";
-import "instruction.proto";
 import "fec_cache.proto";
 import "generator.proto";
+import "instruction.proto";
 import "mutator.proto";
+import "task.proto";
 import "train_budget.proto";
+
 
 enum FitnessCombinationMode {
   UNKNOWN_FITNESS_COMBINATION = 0;
@@ -54,9 +54,9 @@ message SearchExperimentSpec {
   // initial_population=NO_OP_ALGORITHM and predict_size_init=5, the predict
   // component function of every algorithm in the initial population will have
   // 5 no-op instructions.
-  optional int32 setup_size_init = 5;  // Required.
+  optional int32 setup_size_init = 5;    // Required.
   optional int32 predict_size_init = 6;  // Required.
-  optional int32 learn_size_init = 7;  // Required.
+  optional int32 learn_size_init = 7;    // Required.
 
   //////////////////////////////////////////////////////////////////////////////
   // Search evaluation. ////////////////////////////////////////////////////////

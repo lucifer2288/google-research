@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@
 
 #include "scann/data_format/dataset.h"
 
+#include <cstdint>
 #include <hash_set>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/substitute.h"
 #include "absl/time/time.h"
@@ -31,8 +33,7 @@
 #include "scann/utils/zip_sort.h"
 #include "tensorflow/core/platform/prefetch.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 void Dataset::UnusedKeyMethod() {}
 
@@ -321,7 +322,7 @@ void TypedDataset<T>::GetDatapoint(size_t index,
 
 template <typename T>
 void DenseDataset<T>::set_dimensionality(DimensionIndex dimensionality) {
-  if (this->size() == 0) {
+  if (this->empty()) {
     this->set_dimensionality_no_checks(dimensionality);
     SetStride();
   } else {
@@ -509,7 +510,7 @@ StatusOr<typename TypedDataset<T>::Mutator*> DenseDataset<T>::GetMutator()
 
 template <typename T>
 void SparseDataset<T>::set_dimensionality(DimensionIndex dimensionality) {
-  if (this->size() == 0) {
+  if (this->empty()) {
     this->set_dimensionality_no_checks(dimensionality);
   } else {
     DCHECK_EQ(this->dimensionality(), dimensionality)
@@ -539,7 +540,7 @@ void SparseDataset<T>::GetDenseDatapoint(size_t index,
 
 template <typename T>
 DimensionIndex SparseDataset<T>::NumActiveDimensions() const {
-  std::unordered_set<DimensionIndex> is_active;
+  absl::flat_hash_set<DimensionIndex> is_active;
   for (size_t i = 0; i < this->size(); ++i) {
     const DatapointPtr<T> dptr = (*this)[i];
     for (DimensionIndex j = 0; j < dptr.nonzero_entries(); ++j) {
@@ -602,7 +603,7 @@ Status SparseDataset<T>::AppendImpl(const GenericFeatureVector& gfv,
         "parameter.");
   }
 
-  if (this->size() == 0) {
+  if (this->empty()) {
     this->set_is_binary(gfv_is_binary);
   }
 
@@ -736,5 +737,4 @@ SCANN_INSTANTIATE_TYPED_CLASS(, TypedDataset);
 SCANN_INSTANTIATE_TYPED_CLASS(, SparseDataset);
 SCANN_INSTANTIATE_TYPED_CLASS(, DenseDataset);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

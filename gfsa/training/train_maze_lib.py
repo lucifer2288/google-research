@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from gfsa import automaton_builder
 from gfsa import jax_util
 from gfsa.datasets import data_loading
 from gfsa.datasets import graph_bundle

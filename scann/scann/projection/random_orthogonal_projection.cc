@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,14 @@
 
 #include "scann/projection/random_orthogonal_projection.h"
 
+#include <cstdint>
+
 #include "Eigen/Core"
 #include "Eigen/QR"
 #include "absl/random/random.h"
 #include "scann/utils/datapoint_utils.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 RandomOrthogonalProjection<T>::RandomOrthogonalProjection(
@@ -89,5 +90,4 @@ Status RandomOrthogonalProjection<T>::ProjectInputImpl(
 DEFINE_PROJECT_INPUT_OVERRIDES(RandomOrthogonalProjection);
 SCANN_INSTANTIATE_TYPED_CLASS(, RandomOrthogonalProjection);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef SCANN__TREE_X_HYBRID_INTERNAL_UTILS_H_
-#define SCANN__TREE_X_HYBRID_INTERNAL_UTILS_H_
+#ifndef SCANN_TREE_X_HYBRID_INTERNAL_UTILS_H_
+#define SCANN_TREE_X_HYBRID_INTERNAL_UTILS_H_
+
+#include <cstdint>
 
 #include "scann/base/restrict_allowlist.h"
 #include "scann/base/search_parameters.h"
@@ -22,8 +24,7 @@
 #include "scann/utils/types.h"
 #include "tensorflow/core/platform/logging.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 inline void TranslateGlobalToLeafLocalWhitelist(
     const SearchParameters& params,
@@ -38,7 +39,7 @@ StatusOr<SingleMachineFactoryOptions> MergeAHLeafOptions(
   const int n_leaves = leaf_searchers.size();
   auto leaf_opts = std::vector<SingleMachineFactoryOptions>(n_leaves);
 
-  int hash_ct = 0, codebook_ct = 0, total_hashed = 0, hash_dim = -1;
+  ssize_t hash_ct = 0, codebook_ct = 0, total_hashed = 0, hash_dim = -1;
 
   ssize_t int8_ct = 0, total_int8 = 0, int8_dim = -1;
   bool int8_has_norms = false;
@@ -156,7 +157,6 @@ StatusOr<SingleMachineFactoryOptions> MergeAHLeafOptions(
   return opts;
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

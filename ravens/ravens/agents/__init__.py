@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ from ravens.agents.transporter import GoalTransporterAgent
 from ravens.agents.transporter import NoTransportTransporterAgent
 from ravens.agents.transporter import OriginalTransporterAgent
 from ravens.agents.transporter import PerPixelLossTransporterAgent
-from ravens.agents.transporter import Transporter6dAgent
+from ravens.agents.transporter_6dof import Transporter6dAgent
 
 names = {'dummy': DummyAgent,
          'transporter': OriginalTransporterAgent,

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,10 +19,12 @@
 1) Equal Error Rate (EER) metric.
 2) D-Prime.
 3) AUC.
+4) Balanced accuracy.
+5) F1 score.
 """
 
 import math
-from typing import Any, Iterable, Tuple, Optional
+from typing import Any, Iterable, Tuple, Optional, Text
 
 import numpy as np
 import scipy.stats
@@ -86,9 +88,10 @@ def calculate_det_curve(labels,
 
 def calculate_auc(labels,
                   predictions,
-                  sample_weight = None):
+                  sample_weight = None,
+                  multi_class = None):
   return skmetrics.roc_auc_score(
-      labels, predictions, sample_weight=sample_weight)
+      labels, predictions, sample_weight=sample_weight, multi_class=multi_class)
 
 
 def dprime_from_auc(auc):
@@ -108,3 +111,14 @@ def dprime_from_auc(auc):
     cumulative distribution function of the normal distribution.
   """
   return math.sqrt(2) * scipy.stats.norm.ppf(auc)
+
+
+def balanced_accuracy(labels,
+                      predictions):
+  return skmetrics.balanced_accuracy_score(y_true=labels, y_pred=predictions)
+
+
+def f1_score(labels,
+             predictions):
+  return skmetrics.f1_score(y_true=labels, y_pred=predictions,
+                            average='weighted')

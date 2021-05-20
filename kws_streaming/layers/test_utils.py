@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,11 +16,12 @@
 """Util functions used for testing."""
 
 import random
+from typing import List
+import dataclasses
 import numpy as np
 from kws_streaming.layers import data_frame
 from kws_streaming.layers import modes
 from kws_streaming.layers.compat import tf
-from kws_streaming.models import model_flags
 
 
 def set_seed(seed):
@@ -29,32 +30,23 @@ def set_seed(seed):
   tf.random.set_seed(seed)
 
 
+@dataclasses.dataclass
 class Params(object):
-  """Parameters for data and other settings.
+  """Parameters for data and other settings."""
 
-  Attributes:
-    cnn_strides: list of strides
-    clip_duration_ms: duration of audio clipl in ms
-    sample_rate: sample rate of the data
-    preprocess: method of preprocessing
-    data_shape: shape of the data in streaming inference mode
-    batch_size: batch size
-    desired_samples: number of samples in one sequence
-  """
+  cnn_strides: List[int]  # all strides in the model
+  clip_duration_ms: float = 16.0  # duration of audio clipl in ms
+  preprocess: str = 'custom'  # special case to customize input data shape
+  sample_rate: int = 16000  # sample rate of the data
+  data_stride: int = 1  # strides for data
+  batch_size: int = 1  # batch size
 
-  def __init__(self, cnn_strides, clip_duration_ms=16):
-    self.sample_rate = 16000
-    self.clip_duration_ms = clip_duration_ms
-
-    # it is a special case to customize input data shape
-    self.preprocess = 'custom'
-
+  def __post_init__(self):
     # defines the step of feeding input data
-    self.data_shape = (np.prod(cnn_strides),)
+    self.data_shape = (int(np.prod(self.cnn_strides)),)
 
-    self.batch_size = 1
     self.desired_samples = int(
-        self.sample_rate * self.clip_duration_ms / model_flags.MS_PER_SECOND)
+        self.sample_rate * self.clip_duration_ms / 1000)
 
     # align data length with the step
     self.desired_samples = (
@@ -153,3 +145,63 @@ class FrameTestBase(tf.test.TestCase):
 
     # generate frames for the whole signal (no streaming here)
     self.output_frames_tf = self.model_tf.predict(self.signal)
+
+
+def generate_img(img_size_y=12,
+                 img_size_x=12,
+                 obj_a=2,
+                 back_bias=1.0,
+                 noise_scale=0.1):
+  """Generates image with square in the center.
+
+  Args:
+    img_size_y: vertical image size
+    img_size_x: horizontal image size
+    obj_a: amplitude of square in the center. if None then produces
+      image without square and with noise only
+    back_bias: background level
+    noise_scale: noise parameter
+  Returns:
+    2D image
+  """
+  img = np.zeros((img_size_y, img_size_x)) + back_bias
+  obj_size_y = img_size_y // 2
+  obj_size_x = img_size_x // 2
+  obj_y = obj_size_y
+  obj_x = obj_size_x
+  if obj_a is not None:
+    for dy in range(obj_size_y):
+      for dx in range(obj_size_x):
+        y = obj_y + dy - obj_size_y//2
+        x = obj_x + dx - obj_size_x//2
+        img[y][x] = img[y][x] + obj_a
+  return img + np.random.normal(
+      size=(img_size_y, img_size_x), scale=noise_scale)
+
+
+def generate_data(img_size_y=12, img_size_x=12, n_samples=16):
+  """Generates 2d images with labels for two category.
+
+  Args:
+    img_size_y: vertical image size
+    img_size_x: horizontal image size
+    n_samples: number of samples
+  Returns:
+    array of 2D images with labels
+  """
+  data = []
+  labels = []
+  for _ in range(n_samples):
+    rnd = np.random.uniform()
+    label = 0
+    if rnd > 0.5:
+      img = generate_img(img_size_y, img_size_x, obj_a=2)
+      label = 1
+    else:
+      img = generate_img(img_size_y, img_size_x, obj_a=None)
+    labels.append(label)
+    data.append(img)
+
+  data = np.asarray(data)
+  labels = np.asarray(labels)
+  return data, labels

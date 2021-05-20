@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 
 
-#ifndef SCANN__DISTANCE_MEASURES_MANY_TO_MANY_MANY_TO_MANY_H_
-#define SCANN__DISTANCE_MEASURES_MANY_TO_MANY_MANY_TO_MANY_H_
+#ifndef SCANN_DISTANCE_MEASURES_MANY_TO_MANY_MANY_TO_MANY_H_
+#define SCANN_DISTANCE_MEASURES_MANY_TO_MANY_MANY_TO_MANY_H_
 
 #include <atomic>
+#include <cstdint>
 
 #include "scann/data_format/datapoint.h"
 #include "scann/data_format/dataset.h"
@@ -26,8 +27,9 @@
 #include "scann/distance_measures/many_to_many/many_to_many_common.h"
 #include "scann/utils/types.h"
 
-namespace tensorflow {
-namespace scann_ops {
+ABSL_DECLARE_FLAG(bool, enable_scann_brute_force_determinism);
+
+namespace research_scann {
 
 namespace mm_internal {
 
@@ -35,14 +37,14 @@ template <typename FloatT, typename CallbackT>
 void DenseDistanceManyToManyImpl(const DistanceMeasure& dist,
                                  const DenseDataset<FloatT>& queries,
                                  const DenseDataset<FloatT>& database,
-                                 thread::ThreadPool* pool, CallbackT callback);
+                                 ThreadPool* pool, CallbackT callback);
 
 SCANN_INSTANTIATE_MANY_TO_MANY(extern, DenseDistanceManyToManyImpl);
 
 template <typename CallbackT>
 Status DenseDistanceManyToManyFP8PretransposedImpl(
     const DistanceMeasure& dist, const DenseDataset<float>& queries,
-    const FP8SimdBlockTransposedDatabase& database, thread::ThreadPool* pool,
+    const FP8SimdBlockTransposedDatabase& database, ThreadPool* pool,
     CallbackT callback);
 
 SCANN_INSTANTIATE_MANY_TO_MANY_FP8(extern,
@@ -63,7 +65,7 @@ template <typename FloatT>
 void DenseDistanceManyToMany(const DistanceMeasure& dist,
                              const DenseDataset<FloatT>& queries,
                              const DenseDataset<FloatT>& database,
-                             thread::ThreadPool* pool,
+                             ThreadPool* pool,
                              ManyToManyResultsCallback<FloatT> callback) {
   mm_internal::DenseDistanceManyToManyImpl(dist, queries, database, pool,
                                            std::move(callback));
@@ -78,7 +80,7 @@ inline Status DenseDistanceManyToManyFP8Pretransposed(
 }
 inline Status DenseDistanceManyToManyFP8Pretransposed(
     const DistanceMeasure& dist, const DenseDataset<float>& queries,
-    const FP8SimdBlockTransposedDatabase& database, thread::ThreadPool* pool,
+    const FP8SimdBlockTransposedDatabase& database, ThreadPool* pool,
     ManyToManyResultsCallback<float> callback) {
   return mm_internal::DenseDistanceManyToManyFP8PretransposedImpl(
       dist, queries, database, pool, std::move(callback));
@@ -92,7 +94,7 @@ inline Status DenseDistanceManyToManyFP8Pretransposed(
 }
 inline Status DenseDistanceManyToManyFP8Pretransposed(
     const DistanceMeasure& dist, const DenseDataset<float>& queries,
-    const FP8SimdBlockTransposedDatabase& database, thread::ThreadPool* pool,
+    const FP8SimdBlockTransposedDatabase& database, ThreadPool* pool,
     ManyToManyTop1OffsetWrapper<float> callback) {
   return mm_internal::DenseDistanceManyToManyFP8PretransposedImpl(
       dist, queries, database, pool, std::move(callback));
@@ -101,7 +103,7 @@ inline Status DenseDistanceManyToManyFP8Pretransposed(
 template <typename FloatT>
 vector<pair<uint32_t, FloatT>> DenseDistanceManyToManyTop1(
     const DistanceMeasure& dist, const DenseDataset<FloatT>& queries,
-    const DenseDataset<FloatT>& database, thread::ThreadPool* pool = nullptr) {
+    const DenseDataset<FloatT>& database, ThreadPool* pool = nullptr) {
   static_assert(IsSameAny<FloatT, float, double>(),
                 "DenseDistanceManyToMany only works with float/double.");
   vector<pair<uint32_t, std::atomic<FloatT>>> tmp_storage(queries.size());
@@ -122,7 +124,6 @@ vector<pair<uint32_t, FloatT>> DenseDistanceManyToManyTop1(
   return result;
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

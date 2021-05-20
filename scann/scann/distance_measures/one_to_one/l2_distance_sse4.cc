@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,13 @@
 // limitations under the License.
 
 #include "scann/distance_measures/one_to_one/l2_distance_sse4.h"
+
+#include <cstdint>
 #ifdef __x86_64__
 
 #include "scann/utils/intrinsics/sse4.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 namespace l2_internal {
 
 template <typename Byte, typename SseFuncs>
@@ -264,7 +265,6 @@ SCANN_SSE4_OUTLINE double DenseSquaredL2DistanceSse4(
 }
 
 }  // namespace l2_internal
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
 
 
 
+#ifndef SCANN_UTILS_FIXED_POINT_PRE_QUANTIZED_FIXED_POINT_H_
+#define SCANN_UTILS_FIXED_POINT_PRE_QUANTIZED_FIXED_POINT_H_
+
+#include <cstdint>
+
 #include "scann/data_format/dataset.h"
 #include "scann/utils/types.h"
 
-#ifndef SCANN__UTILS_FIXED_POINT_PRE_QUANTIZED_FIXED_POINT_H_
-#define SCANN__UTILS_FIXED_POINT_PRE_QUANTIZED_FIXED_POINT_H_
-
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 struct PreQuantizedFixedPoint {
   shared_ptr<DenseDataset<int8_t>> fixed_point_dataset = nullptr;
@@ -35,9 +36,7 @@ inline PreQuantizedFixedPoint CreatePreQuantizedFixedPoint(
     const DenseDataset<int8_t>& dataset, const vector<float>& multipliers,
     const vector<float>& norms, bool reciprocate = false) {
   PreQuantizedFixedPoint res;
-  res.fixed_point_dataset = make_shared<DenseDataset<int8_t>>(
-      vector<int8_t>(dataset.data().begin(), dataset.data().end()),
-      dataset.docids()->Copy());
+  res.fixed_point_dataset = make_shared<DenseDataset<int8_t>>(dataset.Copy());
   res.multiplier_by_dimension =
       make_shared<vector<float>>(multipliers.begin(), multipliers.end());
   res.squared_l2_norm_by_datapoint =
@@ -48,7 +47,6 @@ inline PreQuantizedFixedPoint CreatePreQuantizedFixedPoint(
   return res;
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

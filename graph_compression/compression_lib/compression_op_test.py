@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ from __future__ import division
 import numpy as np
 import tensorflow.compat.v1 as tf
 from graph_compression.compression_lib import compression_op
+from graph_compression.compression_lib import compression_wrapper
+from graph_compression.compression_lib.keras_layers import layers as compression_layers
 
 tf.enable_v2_behavior()
 
@@ -257,13 +259,13 @@ class CompressionOpInterfaceTest(tf.test.TestCase):
                 np.linalg.norm(c.c_matrix_tfvar.eval())
             ]) > 0, [True, True, True])
 
-        tf.compat.v1.assign(global_step, 2000).eval()
+        tf.compat.v1.assign(global_step, 2001).eval()
         apply_comp._all_update_op.run()
         _ = a_matrix_compressed.eval()
-        self.assertEqual(c._global_step.eval(), 2000)
+        self.assertEqual(c._global_step.eval(), 2001)
         self.assertAlmostEqual(c.alpha.eval(), 0.98)
         self.assertAlmostEqual(c2.alpha.eval(), 0.98)
-        self.assertEqual(c._last_alpha_update_step.eval(), 2000)
+        self.assertEqual(c._last_alpha_update_step.eval(), 2001)
         self.assertAllEqual(
             np.array([
                 np.linalg.norm(c.a_matrix_tfvar.eval()),
@@ -271,6 +273,170 @@ class CompressionOpInterfaceTest(tf.test.TestCase):
                 np.linalg.norm(c.c_matrix_tfvar.eval())
             ]) > 0, [True, True, True])
 
+
+class InputOutputCompressionOpTest(tf.test.TestCase):
+
+  def test_get_apply_matmul(self):
+    with tf.Graph().as_default():
+      with self.cached_session():
+        hparams = ("name=input_output_compression,"
+                   "compression_option=9,"
+                   "begin_compression_step=1000,"
+                   "end_compression_step=120000,"
+                   "compression_frequency=100,"
+                   "compress_input=True,"
+                   "compress_output=True,"
+                   "input_compression_factor=2,"
+                   "input_block_size=4,"
+                   "output_compression_factor=2,"
+                   "output_block_size=4,")
+        compression_op_spec = (
+            compression_op.InputOutputCompressionOp.get_default_hparams().parse(
+                hparams))
+
+        compressor_spec = (
+            compression_op.LowRankDecompMatrixCompressor.get_default_hparams())
+        matrix_compressor = compression_op.LowRankDecompMatrixCompressor(
+            spec=compressor_spec)
+
+        global_step = tf.compat.v1.get_variable("global_step", initializer=100)
+        apply_comp = compression_op.ApplyCompression(
+            scope="default_scope",
+            compression_spec=compression_op_spec,
+            compressor=matrix_compressor,
+            global_step=global_step)
+
+        # outer product - creates an 12x8 matrix
+        a_matrix_init = np.outer(
+            np.array([1., 2., 3., 7., 8., 9., 1., 2., 5., -2., -7., -1.]),
+            np.array([4., 5., 6., 3., 1., 8., 3., 2.]))
+        a_matrix = tf.compat.v1.get_variable(
+            "a_matrix",
+            initializer=a_matrix_init.astype(np.float32),
+            dtype=tf.float32)
+        _ = apply_comp.apply_compression(
+            a_matrix, scope="compressor")
+        # input is 1x12 vector
+        left_operand_init = np.expand_dims(
+            np.array([1., 2., 3., 4., 1., 2., 3., 4., 1., 2., 3., 4.]), axis=0)
+        left_operand = tf.compat.v1.get_variable(
+            "left_operand",
+            initializer=left_operand_init.astype(np.float32),
+            dtype=tf.float32)
+        c = apply_comp._compression_ops[-1]
+        tf.compat.v1.global_variables_initializer().run()
+        compressed_matmul = c.get_apply_matmul(left_operand)
+        # check b, c and d matrices have the right shapes
+        self.assertSequenceEqual(list(c.b_matrix_tfvar.eval().shape), [4, 2])
+        self.assertSequenceEqual(list(c.c_matrix_tfvar.eval().shape), [6, 4])
+        self.assertSequenceEqual(list(c.d_matrix_tfvar.eval().shape), [2, 4])
+
+        # check that we get the expected output shape
+        self.assertSequenceEqual(list(compressed_matmul.eval().shape), [1, 8])
+
+
+class BlockCompressionOpTest(tf.test.TestCase):
+
+  def test_get_apply_matmul(self):
+    with tf.Graph().as_default():
+      with self.cached_session():
+        hparams = ("name=block_compression,"
+                   "compression_option=10,"
+                   "begin_compression_step=1000,"
+                   "end_compression_step=120000,"
+                   "compression_frequency=100,"
+                   "block_method=mask,"
+                   "block_compression_factor=2,")
+        compression_op_spec = (
+            compression_op.BlockCompressionOp.get_default_hparams().parse(
+                hparams))
+
+        compressor_spec = (
+            compression_op.LowRankDecompMatrixCompressor.get_default_hparams())
+        matrix_compressor = compression_op.LowRankDecompMatrixCompressor(
+            spec=compressor_spec)
+
+        global_step = tf.compat.v1.get_variable("global_step", initializer=100)
+        apply_comp = compression_op.ApplyCompression(
+            scope="default_scope",
+            compression_spec=compression_op_spec,
+            compressor=matrix_compressor,
+            global_step=global_step)
+
+        # outer product - creates an 12x8 matrix
+        a_matrix_init = np.outer(
+            np.array([1., 2., 3., 7., 8., 9., 1., 2., 5., -2., -7., -1.]),
+            np.array([4., 5., 6., 3., 1., 8., 3., 2.]))
+        a_matrix = tf.compat.v1.get_variable(
+            "a_matrix",
+            initializer=a_matrix_init.astype(np.float32),
+            dtype=tf.float32)
+        _ = apply_comp.apply_compression(
+            a_matrix, scope="compressor")
+        # input is 1x12 vector
+        left_operand_init = np.expand_dims(
+            np.array([1., 2., 3., 4., 1., 2., 3., 4., 1., 2., 3., 4.]), axis=0)
+        left_operand = tf.compat.v1.get_variable(
+            "left_operand",
+            initializer=left_operand_init.astype(np.float32),
+            dtype=tf.float32)
+        c = apply_comp._compression_ops[-1]
+        tf.compat.v1.global_variables_initializer().run()
+        compressed_matmul = c.get_apply_matmul(left_operand)
+        # check c, c_mask matrices have the right shapes
+        self.assertSequenceEqual(list(c.c_matrix_tfvar.eval().shape), [12, 8])
+        self.assertSequenceEqual(list(c.c_mask_tfvar.eval().shape), [12, 8])
+        # check we get the correct number of nonzero entries in the mask
+        self.assertEqual(np.count_nonzero(c.c_mask_tfvar.eval()), 48)
+        # check that we get the expected output shape
+        self.assertSequenceEqual(list(compressed_matmul.eval().shape), [1, 8])
+
+
+class CompressionLayersTest(tf.test.TestCase):
+
+  def testCompressedDenseLayer(self):
+    hparams = ("name=mnist_compression,"
+               "compress_input=True,"
+               "input_block_size=16,"
+               "input_compression_factor=4,"
+               "compression_option=9")
+
+    compression_hparams = compression_op.InputOutputCompressionOp.get_default_hparams(
+    ).parse(hparams)
+    # compression_hparams = pruning.get_pruning_hparams().parse(hparams)
+    # Create a compression object using the compression hyperparameters
+    compression_obj = compression_wrapper.get_apply_compression(
+        compression_hparams, global_step=0)
+    val = np.random.random((10, 48))
+    x = tf.Variable(val, dtype=tf.float32)
+    y_compressed = compression_layers.CompressedDense(
+        20, compression_obj=compression_obj)(x)
+    y = tf.keras.layers.Dense(
+        20)(x)
+
+    self.assertAllEqual(y.shape.as_list(), y_compressed.shape.as_list())
+
+  def testCompressedConv2DLayer(self):
+    hparams = ("name=mnist_compression,"
+               "compress_input=True,"
+               "input_block_size=16,"
+               "input_compression_factor=2,"
+               "compression_option=9")
+
+    compression_hparams = compression_op.InputOutputCompressionOp.get_default_hparams(
+    ).parse(hparams)
+    compression_obj = compression_wrapper.get_apply_compression(
+        compression_hparams, global_step=0)
+
+    val = np.random.random((10, 4, 10, 10))
+    x = tf.Variable(val, dtype=tf.float32)
+    y_compressed = compression_layers.CompressedConv2D(
+        20, 3, padding="valid", data_format="channels_last",
+        compression_obj=compression_obj)(x)
+    y = tf.keras.layers.Conv2D(
+        20, 3, padding="valid", data_format="channels_last")(x)
+
+    self.assertAllEqual(y.shape.as_list(), y_compressed.shape.as_list())
 
 if __name__ == "__main__":
   tf.test.main()

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 from kws_streaming.layers import data_frame
 from kws_streaming.layers import stream
 from kws_streaming.layers.compat import tf
-from kws_streaming.models import utils
+import kws_streaming.models.model_utils as utils
 
 
 def model_parameters(parser_nn):

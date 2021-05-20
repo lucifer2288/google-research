@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
 import math
 import os
 import time
@@ -54,9 +55,13 @@ from tf_agents.utils import common
 
 # Import needed to trigger env registration, so pylint: disable=unused-import
 from social_rl import gym_multigrid
+from social_rl.multiagent_tfagents import football_gym_env
 from social_rl.multiagent_tfagents import multiagent_gym_suite
 from social_rl.multiagent_tfagents import multiagent_metrics
 from social_rl.multiagent_tfagents import multiagent_ppo
+from social_rl.multiagent_tfagents.joint_attention import drivers
+from social_rl.multiagent_tfagents.joint_attention import utils
+
 
 flags.DEFINE_string('root_dir', os.getenv('TEST_UNDECLARED_OUTPUTS_DIR'),
                     'Root directory for writing logs/summaries/checkpoints.')
@@ -87,8 +92,8 @@ flags.DEFINE_integer('conv_filters', 16, '')
 flags.DEFINE_integer('conv_kernel', 3, '')
 flags.DEFINE_integer(
     'direction_fc', 5,
-    'Number of fully-connected neurons connecting the one-hot direction to the main LSTM.'
-)
+    'Number of fully-connected neurons connecting the one-hot'
+    'direction to the main LSTM.')
 flags.DEFINE_integer('actor_fc_layers_size', 32, '')
 flags.DEFINE_integer('value_fc_layers_size', 32, '')
 flags.DEFINE_integer('lstm_size', 256, '')
@@ -96,6 +101,8 @@ flags.DEFINE_integer('lstm_size', 256, '')
 flags.DEFINE_boolean('debug', False, 'Turn on debugging and tf functions off.')
 flags.DEFINE_list('inactive_agent_ids', None,
                   'List of agent IDs to fix and not train')
+flags.DEFINE_integer('random_seed', 0, 'Random seed for policy and env.')
+flags.DEFINE_string('reinit_checkpoint_dir', None, 'Checkpoint for reinit.')
 FLAGS = flags.FLAGS
 
 # Loss value that is considered too high and training will be terminated.
@@ -111,17 +118,19 @@ def train_eval(
     root_dir,
     env_name='MultiGrid-Empty-5x5-v0',
     env_load_fn=multiagent_gym_suite.load,
-    random_seed=None,
+    random_seed=0,
     # Architecture params
-    actor_fc_layers=(32, 32),
-    value_fc_layers=(32, 32),
-    lstm_size=(128,),
-    conv_filters=8,
+    agent_class=multiagent_ppo.MultiagentPPO,
+    actor_fc_layers=(64, 64),
+    value_fc_layers=(64, 64),
+    lstm_size=(64,),
+    conv_filters=64,
     conv_kernel=3,
     direction_fc=5,
     entropy_regularization=0.,
+    use_attention_networks=False,
     # Specialized agents
-    inactive_agent_ids=None,
+    inactive_agent_ids=tuple(),
     # Params for collect
     num_environment_steps=25000000,
     collect_episodes_per_iteration=30,
@@ -143,6 +152,7 @@ def train_eval(
     debug_summaries=True,
     summarize_grads_and_vars=True,
     eval_metrics_callback=None,
+    reinit_checkpoint_dir=None,
     debug=True):
   """A simple train and eval for PPO."""
   tf.compat.v1.enable_v2_behavior()
@@ -154,9 +164,8 @@ def train_eval(
     logging.info('In debug mode, turning tf_functions off')
     use_tf_functions = False
 
-  if inactive_agent_ids:
-    for a in inactive_agent_ids:
-      logging.info('Fixing and not training agent %d', a)
+  for a in inactive_agent_ids:
+    logging.info('Fixing and not training agent %d', a)
 
   # Load multiagent gym environment and determine number of agents
   gym_env = env_load_fn(env_name)
@@ -187,10 +196,23 @@ def train_eval(
       tf.compat.v1.set_random_seed(random_seed)
 
     logging.info('Creating %d environments...', num_parallel_environments)
-    eval_tf_env = tf_py_environment.TFPyEnvironment(gym_env)
+    wrappers = []
+    if use_attention_networks:
+      wrappers = [lambda env: utils.LSTMStateWrapper(env, lstm_size=lstm_size)]
+
+    eval_tf_env = tf_py_environment.TFPyEnvironment(
+        env_load_fn(
+            env_name,
+            gym_kwargs=dict(seed=random_seed),
+            gym_env_wrappers=wrappers))
+    # pylint: disable=g-complex-comprehension
     tf_env = tf_py_environment.TFPyEnvironment(
-        parallel_py_environment.ParallelPyEnvironment(
-            [lambda: env_load_fn(env_name)] * num_parallel_environments))
+        parallel_py_environment.ParallelPyEnvironment([
+            functools.partial(env_load_fn, environment_name=env_name,
+                              gym_env_wrappers=wrappers,
+                              gym_kwargs=dict(seed=random_seed * 1234 + i))
+            for i in range(num_parallel_environments)
+        ]))
 
 
     logging.info('Preparing to train...')
@@ -199,16 +221,19 @@ def train_eval(
         tf_metrics.NumberOfEpisodes(),
         environment_steps_metric,
     ]
-
+    bonus_metrics = [
+        multiagent_metrics.MultiagentScalar(
+            n_agents, name='UnscaledMultiagentBonus', buffer_size=1000),
+    ]
     train_metrics = step_metrics + [
         multiagent_metrics.AverageReturnMetric(
             n_agents, batch_size=num_parallel_environments),
         tf_metrics.AverageEpisodeLengthMetric(
-            batch_size=num_parallel_environments)
+            batch_size=num_parallel_environments),
     ]
 
     logging.info('Creating agent...')
-    tf_agent = multiagent_ppo.MultiagentPPO(
+    tf_agent = agent_class(
         tf_env.time_step_spec(),
         tf_env.action_spec(),
         n_agents=n_agents,
@@ -226,7 +251,6 @@ def train_eval(
         train_step_counter=global_step,
         inactive_agent_ids=inactive_agent_ids)
     tf_agent.initialize()
-
     eval_policy = tf_agent.policy
     collect_policy = tf_agent.collect_policy
 
@@ -237,13 +261,54 @@ def train_eval(
         max_length=replay_buffer_capacity)
     logging.info('RB capacity: %i', replay_buffer.capacity)
 
+    # If reinit_checkpoint_dir is provided, the last agent in the checkpoint is
+    # reinitialized. The other agents are novices.
+    # Otherwise, all agents are reinitialized from train_dir.
+    if reinit_checkpoint_dir:
+      reinit_checkpointer = common.Checkpointer(
+          ckpt_dir=reinit_checkpoint_dir,
+          agent=tf_agent,
+      )
+      reinit_checkpointer.initialize_or_restore()
+      temp_dir = os.path.join(train_dir, 'tmp')
+      agent_checkpointer = common.Checkpointer(
+          ckpt_dir=temp_dir,
+          agent=tf_agent.agents[:-1],
+      )
+      agent_checkpointer.save(global_step=0)
+      tf_agent = agent_class(
+          tf_env.time_step_spec(),
+          tf_env.action_spec(),
+          n_agents=n_agents,
+          learning_rate=learning_rate,
+          actor_fc_layers=actor_fc_layers,
+          value_fc_layers=value_fc_layers,
+          lstm_size=lstm_size,
+          conv_filters=conv_filters,
+          conv_kernel=conv_kernel,
+          direction_fc=direction_fc,
+          entropy_regularization=entropy_regularization,
+          num_epochs=num_epochs,
+          debug_summaries=debug_summaries,
+          summarize_grads_and_vars=summarize_grads_and_vars,
+          train_step_counter=global_step,
+          inactive_agent_ids=inactive_agent_ids,
+          non_learning_agents=list(range(n_agents - 1)))
+      agent_checkpointer = common.Checkpointer(
+          ckpt_dir=temp_dir, agent=tf_agent.agents[:-1])
+      agent_checkpointer.initialize_or_restore()
+      tf.io.gfile.rmtree(temp_dir)
+      eval_policy = tf_agent.policy
+      collect_policy = tf_agent.collect_policy
+
     train_checkpointer = common.Checkpointer(
         ckpt_dir=train_dir,
         agent=tf_agent,
         global_step=global_step,
         metrics=multiagent_metrics.MultiagentMetricsGroup(
-            train_metrics, 'train_metrics'))
-    train_checkpointer.initialize_or_restore()
+            train_metrics + bonus_metrics, 'train_metrics'))
+    if not reinit_checkpoint_dir:
+      train_checkpointer.initialize_or_restore()
     logging.info('Successfully initialized train checkpointer')
 
     policy_checkpointer = common.Checkpointer(
@@ -251,15 +316,31 @@ def train_eval(
         policy=eval_policy,
         global_step=global_step)
     saved_model = policy_saver.PolicySaver(eval_policy, train_step=global_step)
+
+    collect_policy_checkpointer = common.Checkpointer(
+        ckpt_dir=os.path.join(train_dir, 'policy'),
+        policy=collect_policy,
+        global_step=global_step)
+    collect_saved_model = policy_saver.PolicySaver(
+        collect_policy, train_step=global_step)
+
     logging.info('Successfully initialized policy saver.')
 
     print('Using TFDriver')
-    collect_driver = tf_driver.TFDriver(
-        tf_env,
-        collect_policy,
-        observers=[replay_buffer.add_batch] + train_metrics,
-        max_episodes=collect_episodes_per_iteration,
-        disable_tf_function=not use_tf_functions)
+    if use_attention_networks:
+      collect_driver = drivers.StateTFDriver(
+          tf_env,
+          collect_policy,
+          observers=[replay_buffer.add_batch] + train_metrics,
+          max_episodes=collect_episodes_per_iteration,
+          disable_tf_function=not use_tf_functions)
+    else:
+      collect_driver = tf_driver.TFDriver(
+          tf_env,
+          collect_policy,
+          observers=[replay_buffer.add_batch] + train_metrics,
+          max_episodes=collect_episodes_per_iteration,
+          disable_tf_function=not use_tf_functions)
 
     def train_step():
       trajectories = replay_buffer.gather_all()
@@ -301,6 +382,7 @@ def train_eval(
             summary_writer=eval_summary_writer,
             summary_prefix='Metrics',
             use_function=use_tf_functions,
+            use_attention_networks=use_attention_networks
         )
         if eval_metrics_callback is not None:
           eval_metrics_callback(results, global_step.numpy())
@@ -312,6 +394,12 @@ def train_eval(
       start_time = time.time()
       time_step = tf_env.reset()
       policy_state = collect_policy.get_initial_state(tf_env.batch_size)
+      if use_attention_networks:
+        # Attention networks require previous policy state to compute attention
+        # weights.
+        time_step.observation['policy_state'] = (
+            policy_state['actor_network_state'][0],
+            policy_state['actor_network_state'][1])
       collect_driver.run(time_step, policy_state)
       collect_time += time.time() - start_time
 
@@ -337,7 +425,7 @@ def train_eval(
       else:
         loss_divergence_counter = 0
 
-      for train_metric in train_metrics:
+      for train_metric in train_metrics + bonus_metrics:
         train_metric.tf_summaries(
             train_step=global_step, step_metrics=step_metrics)
 
@@ -355,18 +443,23 @@ def train_eval(
           tf.compat.v2.summary.scalar(
               name='global_steps_per_sec', data=steps_per_sec, step=global_step)
 
-        if global_step_val % train_checkpoint_interval == 0:
-          train_checkpointer.save(global_step=global_step_val)
-
-        if global_step_val % policy_checkpoint_interval == 0:
-          policy_checkpointer.save(global_step=global_step_val)
-          saved_model_path = os.path.join(
-              saved_model_dir, 'policy_' + ('%d' % global_step_val).zfill(9))
-          saved_model.save(saved_model_path)
-
         timed_at_step = global_step_val
         collect_time = 0
         train_time = 0
+
+      if global_step_val % train_checkpoint_interval == 0:
+        train_checkpointer.save(global_step=global_step_val)
+
+      if global_step_val % policy_checkpoint_interval == 0:
+        policy_checkpointer.save(global_step=global_step_val)
+        saved_model_path = os.path.join(
+            saved_model_dir, 'policy_' + ('%d' % global_step_val).zfill(9))
+        saved_model.save(saved_model_path)
+        collect_policy_checkpointer.save(global_step=global_step_val)
+        collect_saved_model_path = os.path.join(
+            saved_model_dir,
+            'collect_policy_' + ('%d' % global_step_val).zfill(9))
+        collect_saved_model.save(collect_saved_model_path)
 
     # One final eval before exiting.
     results = multiagent_metrics.eager_compute(
@@ -378,6 +471,7 @@ def train_eval(
         summary_writer=eval_summary_writer,
         summary_prefix='Metrics',
         use_function=use_tf_functions,
+        use_attention_networks=use_attention_networks
     )
     if eval_metrics_callback is not None:
       eval_metrics_callback(results, global_step.numpy())
@@ -386,11 +480,16 @@ def train_eval(
 
 def main(_):
   logging.set_verbosity(logging.INFO)
-  inactive_agent_ids = None
+  inactive_agent_ids = tuple()
   if FLAGS.inactive_agent_ids:
     inactive_agent_ids = [int(fid) for fid in FLAGS.inactive_agent_ids]
+  if 'academy' in FLAGS.env_name:
+    env_load_fn = football_gym_env.load
+  else:
+    env_load_fn = multiagent_gym_suite.load
   train_eval(
       FLAGS.root_dir,
+      env_load_fn=env_load_fn,
       env_name=FLAGS.env_name,
       num_environment_steps=FLAGS.num_environment_steps,
       collect_episodes_per_iteration=FLAGS.collect_episodes_per_iteration,
@@ -409,7 +508,9 @@ def main(_):
       conv_kernel=FLAGS.conv_kernel,
       direction_fc=FLAGS.direction_fc,
       debug=FLAGS.debug,
-      inactive_agent_ids=inactive_agent_ids)
+      inactive_agent_ids=inactive_agent_ids,
+      random_seed=FLAGS.random_seed,
+      reinit_checkpoint_dir=FLAGS.reinit_checkpoint_dir)
 
 
 if __name__ == '__main__':

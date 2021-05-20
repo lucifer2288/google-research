@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -61,7 +61,11 @@ def get_input_data_shape(flags, mode):
     if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
       data_shape = (flags.desired_samples,)
     else:
-      data_shape = (flags.window_stride_samples,)  # streaming
+      # number of input audio samples required to produce one output frame
+      framing_stride = flags.window_stride_samples
+
+      # data_stride is for streaming with stride/pool
+      data_shape = (framing_stride * flags.data_stride,)
   elif flags.preprocess == 'mfcc':
     if mode in (Modes.TRAINING, Modes.NON_STREAM_INFERENCE):
       data_shape = (flags.spectrogram_length, flags.dct_num_features,)

@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 
 
-#ifndef SCANN__DATA_FORMAT_DATASET_H_
-#define SCANN__DATA_FORMAT_DATASET_H_
+#ifndef SCANN_DATA_FORMAT_DATASET_H_
+#define SCANN_DATA_FORMAT_DATASET_H_
 
 #include <memory>
 #include <type_traits>
@@ -34,8 +34,7 @@
 #include "scann/utils/util_functions.h"
 #include "tensorflow/core/platform/prefetch.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 class TypedDataset;
@@ -79,7 +78,7 @@ class Dataset : public VirtualDestructor {
 
   virtual void clear() = 0;
 
-  virtual tensorflow::scann_ops::TypeTag TypeTag() const = 0;
+  virtual research_scann::TypeTag TypeTag() const = 0;
 
   virtual void GetDatapoint(size_t index, Datapoint<double>* result) const = 0;
 
@@ -173,9 +172,7 @@ class TypedDataset : public Dataset {
   explicit TypedDataset(unique_ptr<DocidCollectionInterface> docids)
       : Dataset(std::move(docids)) {}
 
-  tensorflow::scann_ops::TypeTag TypeTag() const final {
-    return TagForType<T>();
-  }
+  research_scann::TypeTag TypeTag() const final { return TagForType<T>(); }
 
   bool is_float() const final { return std::is_floating_point<T>::value; }
 
@@ -258,6 +255,8 @@ class DenseDataset final : public TypedDataset<T> {
   DenseDataset<T> Copy() const {
     auto result = DenseDataset<T>(data_, this->docids()->Copy());
     result.set_normalization_tag(this->normalization());
+
+    result.set_dimensionality(this->dimensionality());
     return result;
   }
 
@@ -287,6 +286,12 @@ class DenseDataset final : public TypedDataset<T> {
   MutableSpan<T> mutable_data() { return MakeMutableSpan(data_); }
   MutableSpan<T> mutable_data(size_t index) {
     return MakeMutableSpan(data_.data() + index * stride_, stride_);
+  }
+
+  vector<T> ClearRecyclingDataVector() {
+    vector<T> result = std::move(data_);
+    this->clear();
+    return result;
   }
 
   void clear() final;
@@ -546,7 +551,6 @@ SCANN_INSTANTIATE_TYPED_CLASS(extern, TypedDataset);
 SCANN_INSTANTIATE_TYPED_CLASS(extern, SparseDataset);
 SCANN_INSTANTIATE_TYPED_CLASS(extern, DenseDataset);
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -780,7 +780,6 @@ def get_pwc_learning_rate(global_step, flags):
 class ModelLoader:
   """The class definition for the evaluation module."""
 
-  # pylint: disable=old-style-class
   def __init__(self, model_path, batch_size, train_dataset, test_dataset):
     self.train_batch_size = batch_size
     self.test_batch_size = batch_size

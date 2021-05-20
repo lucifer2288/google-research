@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,21 @@
 
 #include "scann/utils/scann_config_utils.h"
 
+#include <cstdint>
 #include <string>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/substitute.h"
 #include "scann/data_format/features.pb.h"
 #include "scann/distance_measures/distance_measure_base.h"
 #include "scann/distance_measures/distance_measure_factory.h"
 #include "scann/partitioning/partitioner.pb.h"
 #include "scann/proto/brute_force.pb.h"
-#include "scann/proto/compressed_reordering.pb.h"
 #include "scann/proto/distance_measure.pb.h"
 #include "scann/proto/exact_reordering.pb.h"
 #include "scann/proto/hash.pb.h"
+#include "scann/proto/incremental_updates.pb.h"
 #include "scann/proto/input_output.pb.h"
 #include "scann/proto/metadata.pb.h"
 #include "scann/proto/partitioning.pb.h"
@@ -33,23 +37,11 @@
 #include "scann/proto/scann.pb.h"
 #include "scann/utils/common.h"
 #include "scann/utils/types.h"
-
-#include "absl/strings/match.h"
-#include "absl/strings/str_format.h"
-#include "absl/strings/substitute.h"
 #include "tensorflow/core/lib/core/errors.h"
 
 using absl::StartsWith;
 
-ABSL_FLAG(
-    bool, training_artifacts_with_stable_basename, false,
-    "If true, guarantees that artifacts placed in preprocessed_artifacts_dir "
-    "will have a base name that is stable if preprocessed_artifacts_dir "
-    "changes.  This defaults to false for backwards compatibility reasons, but "
-    "new projects should set it to true.");
-
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 namespace {
 
@@ -112,6 +104,10 @@ Status CanonicalizeScannConfigImpl(ScannConfig* config,
   SCANN_RETURN_IF_ERROR(CanonicalizeDeprecatedFields(config));
   SCANN_RETURN_IF_ERROR(EnsureCorrectNormalizationForDistanceMeasure(config));
   auto io = config->mutable_input_output();
+
+  const bool with_fingerprint_postfix =
+      config->input_output().artifacts_naming_option() ==
+      InputOutputConfig::HASHED;
 
   if (io->preprocessed_artifacts_dir().empty()) {
     return CanonicalizeRecallCurves(config);
@@ -191,24 +187,6 @@ Status CanonicalizeScannConfigForRetrieval(ScannConfig* config) {
     config->mutable_hash()->mutable_asymmetric_hash()->set_centers_filename(
         cfg2.hash().asymmetric_hash().centers_filename());
   }
-  if (config->compressed_reordering()
-          .hash()
-          .asymmetric_hash()
-          .centers_filename()
-          .empty() &&
-      !cfg2.compressed_reordering()
-           .hash()
-           .asymmetric_hash()
-           .centers_filename()
-           .empty()) {
-    config->mutable_compressed_reordering()
-        ->mutable_hash()
-        ->mutable_asymmetric_hash()
-        ->set_centers_filename(cfg2.compressed_reordering()
-                                   .hash()
-                                   .asymmetric_hash()
-                                   .centers_filename());
-  }
   const auto& io1 = config->input_output();
   const auto& io2 = cfg2.input_output();
   if (io1.hashed_database_wildcard().empty() &&
@@ -232,11 +210,6 @@ Status CanonicalizeScannConfigForRetrieval(ScannConfig* config) {
       !io2.tokenized_database_wildcard().empty()) {
     config->mutable_input_output()->set_tokenized_database_wildcard(
         io2.tokenized_database_wildcard());
-  }
-  if (io1.compressed_database_wildcard().empty() &&
-      !io2.compressed_database_wildcard().empty()) {
-    config->mutable_input_output()->set_compressed_database_wildcard(
-        io2.compressed_database_wildcard());
   }
   return OkStatus();
 }
@@ -264,7 +237,7 @@ StatusOr<InputOutputConfig::InMemoryTypes> DetectInMemoryTypeFromGfv(
 }
 
 StatusOr<InputOutputConfig::InMemoryTypes> DetectInMemoryTypeFromDisk(
-    const ScannConfig& config) {
+    const ScannConfig& config, const size_t shard) {
   if (!config.has_input_output()) {
     return InvalidArgumentError("config must have input_output.");
   }
@@ -304,7 +277,6 @@ Status EnsureCorrectNormalizationForDistanceMeasure(ScannConfig* config) {
   } else {
     return OkStatus();
   }
-
   TF_ASSIGN_OR_RETURN(const Normalization expected_normalization,
                       NormalizationRequired(main_distance_measure));
   const bool normalization_user_specified =
@@ -328,13 +300,16 @@ Status EnsureCorrectNormalizationForDistanceMeasure(ScannConfig* config) {
           static_cast<InputOutputConfig::FeatureNorm>(expected_normalization));
     }
 
-    TF_ASSIGN_OR_RETURN(InputOutputConfig::InMemoryTypes in_memory_type,
-                        DetectInMemoryTypeFromDisk(*config));
-    if (in_memory_type != InputOutputConfig::FLOAT &&
-        in_memory_type != InputOutputConfig::DOUBLE) {
-      LOG(WARNING) << "Performing "
-                   << NormalizationString(expected_normalization)
-                   << " normalization with an integral type.";
+    StatusOr<InputOutputConfig::InMemoryTypes> in_memory_type_or_error =
+        DetectInMemoryTypeFromDisk(*config);
+    if (in_memory_type_or_error.ok()) {
+      auto in_memory_type = in_memory_type_or_error.ValueOrDie();
+      if (in_memory_type != InputOutputConfig::FLOAT &&
+          in_memory_type != InputOutputConfig::DOUBLE) {
+        LOG(WARNING) << "Performing "
+                     << NormalizationString(expected_normalization)
+                     << " normalization with an integral type.";
+      }
     }
   }
 
@@ -392,5 +367,4 @@ Status EnsureCorrectNormalizationForDistanceMeasure(ScannConfig* config) {
   return OkStatus();
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

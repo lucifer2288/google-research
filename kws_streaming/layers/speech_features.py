@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -101,7 +101,9 @@ class SpeechFeatures(tf.keras.layers.Layer):
         mode=self.mode,
         inference_batch_size=self.inference_batch_size,
         frame_size=self.frame_size,
-        frame_step=self.frame_step)
+        frame_step=self.frame_step,
+        use_one_step=self.params['use_one_step'],
+        padding=self.params['data_frame_padding'])
 
     if self.noise_scale != 0.0 and self.mode == modes.Modes.TRAINING:
       self.add_noise = tf.keras.layers.GaussianNoise(stddev=self.noise_scale)
@@ -185,6 +187,9 @@ class SpeechFeatures(tf.keras.layers.Layer):
 
     if self.params['mel_num_bins'] <= 0:
       raise ValueError('mel_num_bins for mfcc_op has to be > 0')
+
+    if not self.params['use_one_step']:
+      raise ValueError('_mfcc_op supports only use_one_step=True')
 
     # MFCC implementation based on TF custom op (supported by TFLite)
     # It reduces model size in comparison to _mfcc_tf
@@ -335,5 +340,9 @@ class SpeechFeatures(tf.keras.layers.Layer):
             int((flags.sp_time_shift_ms * flags.sample_rate) / 1000),
         'sp_resample':
             flags.sp_resample,
+        'use_one_step':
+            flags.data_stride <= 1,
+        'data_frame_padding':
+            flags.data_frame_padding,
     }
     return params

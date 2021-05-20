@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 
 
-#ifndef SCANN__HASHES_ASYMMETRIC_HASHING2_INDEXING_H_
-#define SCANN__HASHES_ASYMMETRIC_HASHING2_INDEXING_H_
+#ifndef SCANN_HASHES_ASYMMETRIC_HASHING2_INDEXING_H_
+#define SCANN_HASHES_ASYMMETRIC_HASHING2_INDEXING_H_
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -29,8 +30,7 @@
 #include "scann/utils/common.h"
 #include "scann/utils/types.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 namespace asymmetric_hashing2 {
 
 template <typename T>
@@ -113,7 +113,6 @@ class Indexer {
 SCANN_INSTANTIATE_TYPED_CLASS(extern, Indexer);
 
 }  // namespace asymmetric_hashing2
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

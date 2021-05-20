@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,23 +16,20 @@
 
 #include "scann/utils/input_data_utils.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 StatusOr<DatapointIndex> SingleMachineFactoryOptions::ComputeConsistentSize(
     const Dataset* dataset) const {
-  return ComputeConsistentNumPointsFromIndex(
-      dataset, hashed_dataset.get(), pre_quantized_fixed_point.get(),
-      compressed_dataset.get(), crowding_attributes.get());
+  return ComputeConsistentNumPointsFromIndex(dataset, hashed_dataset.get(),
+                                             pre_quantized_fixed_point.get(),
+                                             crowding_attributes.get());
 }
 
 StatusOr<DimensionIndex>
 SingleMachineFactoryOptions::ComputeConsistentDimensionality(
     const HashConfig& config, const Dataset* dataset) const {
   return ComputeConsistentDimensionalityFromIndex(
-      config, dataset, hashed_dataset.get(), pre_quantized_fixed_point.get(),
-      compressed_dataset.get());
+      config, dataset, hashed_dataset.get(), pre_quantized_fixed_point.get());
 }
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

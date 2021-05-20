@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 
 
-#ifndef SCANN__BRUTE_FORCE_SCALAR_QUANTIZED_BRUTE_FORCE_H_
-#define SCANN__BRUTE_FORCE_SCALAR_QUANTIZED_BRUTE_FORCE_H_
+#ifndef SCANN_BRUTE_FORCE_SCALAR_QUANTIZED_BRUTE_FORCE_H_
+#define SCANN_BRUTE_FORCE_SCALAR_QUANTIZED_BRUTE_FORCE_H_
 
+#include <cstdint>
 #include <utility>
 
 #include "scann/base/search_parameters.h"
@@ -29,8 +30,7 @@
 #include "scann/utils/types.h"
 #include "tensorflow/core/lib/core/status.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 class ScalarQuantizedBruteForceSearcher final
     : public SingleMachineSearcherBase<float> {
@@ -132,8 +132,6 @@ class ScalarQuantizedBruteForceSearcher final
   Options opts_;
 
   vector<float> inverse_multiplier_by_dimension_;
-
-  mutable unique_ptr<Mutator> mutator_ = nullptr;
 };
 
 class TreeScalarQuantizationPreprocessedQuery final
@@ -166,7 +164,6 @@ class TreeScalarQuantizationPreprocessedQueryCreator final
   const vector<float> inverse_multipliers_;
 };
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

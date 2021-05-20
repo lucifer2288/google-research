@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ from absl import logging
 import tensorflow.compat.v1 as tf
 from kws_streaming.layers import modes
 from kws_streaming.models import model_flags
-from kws_streaming.models import utils
+from kws_streaming.models import model_utils
 import kws_streaming.models.att_mh_rnn as att_mh_rnn
 import kws_streaming.models.att_rnn as att_rnn
 import kws_streaming.models.cnn as cnn
@@ -184,7 +184,7 @@ def main(_):
 
   name2opt = {
       '': None,
-      'quantize_opt_for_size_': [tf.lite.Optimize.OPTIMIZE_FOR_SIZE],
+      'quantize_opt_for_size_': [tf.lite.Optimize.DEFAULT],
   }
 
   for opt_name, optimizations in name2opt.items():
@@ -212,17 +212,21 @@ def main(_):
     # below models can use striding in time dimension,
     # but this is currently unsupported
     elif flags.model_name == 'cnn':
-      for strides in utils.parse(flags.cnn_strides):
+      for strides in model_utils.parse(flags.cnn_strides):
         if strides[0] > 1:
           model_is_streamable = False
           break
     elif flags.model_name == 'ds_cnn':
-      if utils.parse(flags.cnn1_strides)[0] > 1:
+      if model_utils.parse(flags.cnn1_strides)[0] > 1:
         model_is_streamable = False
-      for strides in utils.parse(flags.dw2_strides):
+      for strides in model_utils.parse(flags.dw2_strides):
         if strides[0] > 1:
           model_is_streamable = False
           break
+
+    # set input data shape for testing inference in streaming mode
+    flags.data_shape = modes.get_input_data_shape(
+        flags, modes.Modes.STREAM_EXTERNAL_STATE_INFERENCE)
 
     # if model can be streamed, then run conversion/evaluation in streaming mode
     if model_is_streamable:

@@ -1,9 +1,34 @@
 # GoEmotions
 
-The GoEmotions dataset contains 58k carefully curated Reddit comments labeled for 27 emotion categories or Neutral. The emotion categories are _admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity, desire, disappointment, disapproval, disgust, embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness, optimism, pride, realization, relief, remorse, sadness, surprise_.
+**GoEmotions** is a corpus of 58k carefully curated comments extracted from Reddit,
+with human annotations to 27 emotion categories or Neutral.
 
-This directory includes the data and code for data analysis scripts. We also include code for our baseline model, which involves fine-tuning a pre-trained [BERT-base model](https://github.com/google-research/bert).
-For more details on the design and content of the dataset, please see our [paper](https://arxiv.org/abs/2005.00547).
+* Number of examples: 58,009.
+* Number of labels: 27 + Neutral.
+* Maximum sequence length in training and evaluation datasets: 30.
+
+On top of the raw data, we also include a version filtered based on reter-agreement, which contains a train/test/validation split:
+
+* Size of training dataset: 43,410.
+* Size of test dataset: 5,427.
+* Size of validation dataset: 5,426.
+
+The emotion categories are: _admiration, amusement, anger, annoyance, approval,
+caring, confusion, curiosity, desire, disappointment, disapproval, disgust,
+embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness,
+optimism, pride, realization, relief, remorse, sadness, surprise_.
+
+
+This directory includes the data and code for data analysis scripts. We also
+include code for our baseline model, which involves fine-tuning a pre-trained
+[BERT-base model](https://github.com/google-research/bert).
+
+For more details on the design and content of the dataset, please see our
+[paper](https://arxiv.org/abs/2005.00547).
+
+Refer to our [GoEmotions Model Card](goemotions_model_card.pdf) for recommended
+uses of models built with this data, as well as considerations and limitations
+relating to the GoEmotions data.
 
 ## Requirements
 
@@ -19,7 +44,7 @@ Download the pre-trained BERT model from
 
 We include our data in the `data` folder. \
 
-Our raw dataset can be retreived by running:
+Our raw dataset can be retrieved by running:
 
 ```
 wget -P data/full_dataset/ https://storage.googleapis.com/gresearch/goemotions/data/full_dataset/goemotions_1.csv
@@ -56,18 +81,18 @@ The data we used for training the models includes examples where there is agreem
 
 See each script for more documentation and descriptive command line flags.
 
-*   `python3 -m goemotions.analyze_data`: get high-level statistics of the
+*   `python3 -m analyze_data`: get high-level statistics of the
     data and correlation among emotion ratings.
-*   `python3 -m goemotions.extract_words`: get the words that are significantly
+*   `python3 -m extract_words`: get the words that are significantly
     associated with each emotion, in contrast to the other emotions, based on
     their log odds ratio.
-*   `python3 -m goemotions.ppca`: run PPCA
+*   `python3 -m ppca`: run PPCA
     [(Cowen et al., 2019)](https://www.nature.com/articles/s41562-019-0533-6) on
     the data and generate plots.
 
 ## Training and Evaluating Models
 
-Run `python -m goemotions.bert_classifier` to perform fine-tuning on top of
+Run `python -m bert_classifier` to perform fine-tuning on top of
 BERT, with added regularization. See the script and the paper for detailed
 description of the flags and parameters.
 

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@
 
 import abc
 import tokenize
+from typing import Collection
 from typing import Dict
 from typing import Iterable
-from typing import List
 from typing import Mapping
 from typing import Sequence
 from typing import Text
@@ -42,7 +42,7 @@ class CuBertTokenizer(abc.ABC):
 
   def __init__(self, max_output_token_length = MAX_OUTPUT_TOKEN_LENGTH,
                reserved = ()):
-    self.types_to_skip = []
+    self.types_to_skip = ()
     self.reserved = reserved
     self.mappings: Dict[str, str]
     self.update_mappings({
@@ -87,14 +87,15 @@ class CuBertTokenizer(abc.ABC):
     """
 
   def update_types_to_skip(
-      self, types_to_skip):
+      self, types_to_skip
+  ):
     """Replaces the set of token types that are ignored.
 
     Each tokenizer may provide different semantics with respect to this list,
     and may ignore it altogether.
 
     Args:
-      types_to_skip: List of types (from the constants in the `token` module) or
+      types_to_skip: Types (from the constants in the `token` module) or
         `unified_tokenizer.TokenKind`. Note that some of those constants are
         actually defined in the `tokenize` module.
     """
@@ -175,8 +176,8 @@ class CuBertTokenizer(abc.ABC):
     subtokens = unified_tokenizer.flatten_subtoken_lists(multi_tokens)
     return subtokens
 
-  def untokenize(self, token_list):
-    """Untokenizes via `untokenize_abstract`."""
+  def untokenize_agnostic(self, token_list):
+    """Turns CuBERT subtokens into whole tokens."""
     # Untokenize agnostic.
     if (not token_list or token_list[-1] != unified_tokenizer.quote_special(
         unified_tokenizer.TokenKind.EOS.name)):
@@ -189,7 +190,11 @@ class CuBertTokenizer(abc.ABC):
         token_list,
         sanitization_mapping=self.mappings,
         sentinel=unified_tokenizer.SENTINEL)
+    return whole_tokens
 
+  def untokenize(self, token_list):
+    """Untokenizes via `untokenize_abstract`."""
+    whole_tokens = self.untokenize_agnostic(token_list)
     return self.untokenize_abstract(whole_tokens)
 
 

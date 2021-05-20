@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -86,13 +86,15 @@ class Actor(tf.keras.Model):
     std = tf.exp(log_std)
 
     dist = ds.TransformedDistribution(
-        distribution=ds.Normal(loc=0., scale=1.),
-        bijector=tfp.bijectors.Chain([
+        ds.Sample(
+            ds.Normal(tf.zeros(mu.shape[:-1]), 1.0),
+            sample_shape=mu.shape[-1:]),
+        tfp.bijectors.Chain([
             tfp.bijectors.Tanh(),
-            tfp.bijectors.Affine(shift=mu, scale_diag=std),
-        ]),
-        event_shape=[mu.shape[-1]],
-        batch_shape=[mu.shape[0]])
+            tfp.bijectors.Shift(shift=mu),
+            tfp.bijectors.ScaleMatvecDiag(scale_diag=std)
+        ]))
+
     return dist, mode
 
   @tf.function

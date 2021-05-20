@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,6 +49,8 @@ class Params(model_params.Params):
     self.train = 0
     self.batch_size = 1
     self.mode = modes.Modes.NON_STREAM_INFERENCE
+    self.data_stride = 1
+    self.data_frame_padding = None
 
 
 class SpeechFeaturesTest(tf.test.TestCase):

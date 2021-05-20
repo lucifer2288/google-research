@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 syntax = "proto2";
 
-package tensorflow.scann_ops;
+package research_scann;
 
 import "scann/proto/incremental_updates.proto";
 
@@ -51,6 +51,14 @@ message InputOutputConfig {
   optional string output_sstable_wildcard = 11;
 
   optional string preprocessed_artifacts_dir = 18;
+
+  enum ArtifactsNamingOption {
+    HASHED = 0;
+
+    NO_HASH = 1;
+  }
+  optional ArtifactsNamingOption artifacts_naming_option = 23
+      [default = HASHED];
 
   message PureDynamicConfig {
     optional int32 num_shards = 1 [default = 1];
@@ -111,11 +119,13 @@ message InputOutputConfig {
 
   optional string hashed_database_wildcard = 12;
   optional string fixed_point_database_wildcard = 17;
-  optional string compressed_database_wildcard = 13;
   optional string tokenized_database_wildcard = 14;
+  optional string memory_consumption_estimate_filename = 24;
 
   reserved 1;
   reserved "input_handler";
   optional bool saturate = 10 [default = false, deprecated = true];
   optional uint64 dimensionality = 4 [deprecated = true];
+
+  reserved 13;
 }

@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,9 @@
 
 #include "scann/oss_wrappers/scann_bits.h"
 
-namespace tensorflow {
-namespace scann_ops {
+#include <cstdint>
+
+namespace research_scann {
 namespace bits {
 
 #if (defined(__i386__) || defined(__x86_64__)) && defined(__GNUC__)
@@ -112,5 +113,4 @@ int Log2Ceiling64(uint64_t n) {
 }
 
 }  // namespace bits
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

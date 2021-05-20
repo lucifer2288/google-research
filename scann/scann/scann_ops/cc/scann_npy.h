@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef SCANN__SCANN_OPS_CC_SCANN_NPY_H_
-#define SCANN__SCANN_OPS_CC_SCANN_NPY_H_
+#ifndef SCANN_SCANN_OPS_CC_SCANN_NPY_H_
+#define SCANN_SCANN_OPS_CC_SCANN_NPY_H_
 
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -26,8 +27,7 @@
 #include "scann/data_format/dataset.h"
 #include "scann/scann_ops/cc/scann.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 
 template <typename T>
 using np_row_major_arr =
@@ -56,7 +56,6 @@ class ScannNumpy {
   ScannInterface scann_;
 };
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann
 
 #endif

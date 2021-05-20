@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 
 #include <math.h>
 
+#include <cstdint>
 #include <memory>
 #include <typeinfo>
 
@@ -28,15 +29,13 @@
 #include "scann/hashes/asymmetric_hashing2/querying.h"
 #include "scann/hashes/asymmetric_hashing2/serialization.h"
 #include "scann/hashes/internal/asymmetric_hashing_postprocess.h"
-#include "tensorflow/core/platform/cpu_info.h"
-
 #include "scann/oss_wrappers/scann_serialize.h"
 #include "scann/utils/datapoint_utils.h"
 #include "scann/utils/types.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/platform/cpu_info.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 namespace asymmetric_hashing2 {
 namespace {
 
@@ -97,7 +96,7 @@ Searcher<T>::Searcher(shared_ptr<TypedDataset<T>> dataset,
 
   if (lut16_) {
     packed_dataset_ =
-        ::tensorflow::scann_ops::asymmetric_hashing2::CreatePackedDataset(
+        ::research_scann::asymmetric_hashing2::CreatePackedDataset(
             *this->hashed_dataset());
 
     const size_t l2_cache_bytes = 256 * 1024;
@@ -156,10 +155,6 @@ Status Searcher<T>::FindNeighborsImpl(const DatapointPtr<T>& query,
                                       const SearchParameters& params,
                                       NNResultsVector* result) const {
   if (limited_inner_product_) {
-    if (opts_.symmetric_queryer_) {
-      return FailedPreconditionError(
-          "LimitedInnerProduct does not work with symmetric queryer.");
-    }
     float query_norm = static_cast<float>(sqrt(SquaredL2Norm(query)));
     asymmetric_hashing_internal::LimitedInnerFunctor functor(query_norm,
                                                              norm_inv_);
@@ -192,8 +187,7 @@ Status Searcher<T>::FindNeighborsBatchedImpl(
       break;
     }
   }
-  if (opts_.symmetric_queryer_ || !lut16_ || limited_inner_product_ ||
-      crowding_enabled_for_any_query ||
+  if (!lut16_ || limited_inner_product_ || crowding_enabled_for_any_query ||
       opts_.quantization_scheme() == AsymmetricHasherConfig::PRODUCT_AND_BIAS) {
     return SingleMachineSearcherBase<T>::FindNeighborsBatchedImpl(
         queries, params, results);
@@ -228,27 +222,26 @@ template <typename PostprocessFunctor>
 Status Searcher<T>::FindNeighborsTopNDispatcher(
     const DatapointPtr<T>& query, const SearchParameters& params,
     PostprocessFunctor postprocessing_functor, NNResultsVector* result) const {
+  auto queryer_options = GetQueryerOptions(postprocessing_functor);
+  LookupTable lookup_table_storage;
+  TF_ASSIGN_OR_RETURN(
+      const LookupTable* lookup_table,
+      GetOrCreateLookupTable(query, params, &lookup_table_storage));
   if (params.pre_reordering_crowding_enabled()) {
     return FailedPreconditionError("Crowding is not supported.");
   } else {
     auto ah_optional_params = params.searcher_specific_optional_parameters<
         AsymmetricHashingOptionalParameters>();
-    if (ah_optional_params && ah_optional_params->top_n() &&
-        !opts_.symmetric_queryer_) {
-      auto queryer_opts = GetQueryerOptions(postprocessing_functor);
-      queryer_opts.first_dp_index = ah_optional_params->starting_dp_idx_;
-      queryer_opts.lut16_bias = ah_optional_params->lut16_bias_;
-      LookupTable lookup_table_storage;
-      TF_ASSIGN_OR_RETURN(
-          const LookupTable* lookup_table,
-          GetOrCreateLookupTable(query, params, &lookup_table_storage));
+    if (ah_optional_params && ah_optional_params->top_n()) {
+      queryer_options.first_dp_index = ah_optional_params->starting_dp_idx_;
+      queryer_options.lut16_bias = ah_optional_params->lut16_bias_;
       SCANN_RETURN_IF_ERROR(AsymmetricQueryer<T>::FindApproximateNeighbors(
-          *lookup_table, params, std::move(queryer_opts),
+          *lookup_table, params, std::move(queryer_options),
           ah_optional_params->top_n_));
     } else {
       TopNeighbors<float> top_n(params.pre_reordering_num_neighbors());
-      SCANN_RETURN_IF_ERROR(FindNeighborsQueryerDispatcher(
-          query, params, postprocessing_functor, &top_n));
+      SCANN_RETURN_IF_ERROR(AsymmetricQueryer<T>::FindApproximateNeighbors(
+          *lookup_table, params, std::move(queryer_options), &top_n));
       *result = top_n.TakeUnsorted();
     }
   }
@@ -270,30 +263,6 @@ QueryerOptions<PostprocessFunctor> Searcher<T>::GetQueryerOptions(
   queryer_options.postprocessing_functor = std::move(postprocessing_functor);
   if (lut16_) queryer_options.lut16_packed_dataset = &packed_dataset_;
   return queryer_options;
-}
-
-template <typename T>
-template <typename PostprocessFunctor, typename TopN>
-Status Searcher<T>::FindNeighborsQueryerDispatcher(
-    const DatapointPtr<T>& query, const SearchParameters& params,
-    PostprocessFunctor postprocessing_functor, TopN* result) const {
-  auto queryer_options = GetQueryerOptions(postprocessing_functor);
-  if (opts_.symmetric_queryer_) {
-    auto view = queryer_options.hashed_dataset.get();
-    Datapoint<uint8_t> hashed_query;
-    SCANN_RETURN_IF_ERROR(opts_.indexer_->Hash(query, &hashed_query));
-    SCANN_RETURN_IF_ERROR(opts_.symmetric_queryer_->FindApproximateNeighbors(
-        hashed_query.ToPtr(), view, params, std::move(queryer_options),
-        result));
-  } else {
-    LookupTable lookup_table_storage;
-    TF_ASSIGN_OR_RETURN(
-        const LookupTable* lookup_table,
-        GetOrCreateLookupTable(query, params, &lookup_table_storage));
-    SCANN_RETURN_IF_ERROR(AsymmetricQueryer<T>::FindApproximateNeighbors(
-        *lookup_table, params, std::move(queryer_options), result));
-  }
-  return OkStatus();
 }
 
 template <typename T>
@@ -411,7 +380,7 @@ Status Searcher<T>::FindOneLowLevelBatchOfNeighbors(
       lookup_ptrs, cur_batch_params, queryer_options, top_ns));
   for (size_t batch_idx = 0; batch_idx < kNumQueries; ++batch_idx) {
     results[low_level_batch_start + batch_idx] =
-        top_ns_storage[batch_idx].ExtractUnsorted();
+        top_ns_storage[batch_idx].TakeUnsorted();
   }
   return OkStatus();
 }
@@ -457,5 +426,4 @@ SCANN_INSTANTIATE_TYPED_CLASS(, Searcher);
 SCANN_INSTANTIATE_TYPED_CLASS(, PrecomputedAsymmetricLookupTableCreator);
 
 }  // namespace asymmetric_hashing2
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

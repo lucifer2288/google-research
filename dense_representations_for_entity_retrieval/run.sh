@@ -1,4 +1,4 @@
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -66,3 +66,7 @@ python -m dense_representations_for_entity_retrieval.parse_wikinews \
    --tsv_dir="${TEMP_DIR}" \
    --output_dir="${TEMP_DIR}" \
    --logtostderr
+
+# Also test the nested package.
+deactivate
+bash dense_representations_for_entity_retrieval/mel/wikinews_extractor/run_test_oss.sh

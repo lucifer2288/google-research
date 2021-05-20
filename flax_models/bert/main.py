@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,13 +19,13 @@ from absl import app
 from absl import flags
 from absl import logging
 
+from clu import platform
 import jax
 from ml_collections import config_flags
 import tensorflow as tf
 
 from flax_models.bert import run_classifier  # pylint: disable=fine-too-long CHANGEME
 from flax_models.bert import run_pretraining  # pylint: disable=fine-too-long CHANGEME
-
 
 FLAGS = flags.FLAGS
 

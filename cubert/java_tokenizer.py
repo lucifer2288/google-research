@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -116,8 +116,7 @@ class JavaTokenizer(cubert_tokenizer.CuBertTokenizer):
                       line=0, column=0))))
       agnostic_tokens.append(
           unified_tokenizer.AbstractToken(
-              unified_tokenizer.quote_special(
-                  unified_tokenizer.TokenKind.EOS.name),
+              '',
               unified_tokenizer.TokenKind.EOS,
               unified_tokenizer.TokenMetadata(
                   start=unified_tokenizer.Position(
@@ -160,6 +159,12 @@ class JavaTokenizer(cubert_tokenizer.CuBertTokenizer):
       # This should be there. Raise an exception
       raise AssertionError('The end of input token is missing positioning '
                            'information: %s' % eos)
+    # EOS contains an empty spelling. We replace it here with EOS.name
+    eos = dataclasses.replace(
+        eos,
+        spelling=unified_tokenizer.quote_special(
+            unified_tokenizer.TokenKind.EOS.name))
+
     later_token_start: unified_tokenizer.Position = eos.metadata.start
 
     # The EOS token has an empty extent, so the end and the start are set to be

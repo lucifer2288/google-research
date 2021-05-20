@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,6 +22,6 @@ from setuptools import find_packages
 core.setup(
     name='ravens',
     version='0.0.1',
-    author='Andy Zeng, Pete Florence, Jonathan Tompson, Daniel Seita',
+    author='Andy Zeng, Pete Florence, Daniel Seita, Jonathan Tompson',
     packages=find_packages(),
 )

@@ -1,5 +1,93 @@
 # CuBERT
 
+
+## Update 2021/03/04: Clarifications
+
+### Errata in Pre-training Corpus
+
+The paper described how we constructed the Python pre-training corpus in detail. We discovered a small deviation in the actual process we followed, which although harmless to the validity of the results, may cause confusion. We explain this deviation here.
+
+We collect our pre-training corpus as follows:
+
+1. Read from BigQuery's GitHub database all files ending in `.py` that are not symbolic links and appear in the `master/head` branch.
+2. Remove from the results of Step #1 those files that are similar (for some approximate similarity metric) to the files in the ETH Py150 Open corpus.
+3. Keep from the results of Step #2 one file per "similarity" cluster, i.e., groups of files that are similar to each other (according to the same approximate similarity metric used in Step #2).
+
+What happened in practice was the following:
+
+1. Step #1 brought in some duplicate files from GitHub, due to cloning (same content digest but different repository and path).
+2. Step #2 removed from the results of Step #1 all files similar to ETH Py150 Open, as intended. That included all clones of such files.
+3. Step #3 didn't remove all identical files from its input. The reason for this was that Step #3 is essentially an O(N^2) process, and N was roughly 14M. To speed the process up, we performed Step #3 in semi-independent batches. As a result, if a file had a clone in another batch, they might both be individually kept by their corresponding batches. That problem did not affect Step #2, because all GitHub files were compared to all ETH Py150 Open files. Therefore, Step #2 was not affected.
+
+Out of the ~7M files in our pre-training corpus, only ~4M files are indeed unique. Consequently, the manifest contains multiple entries for some GitHub SHA1 digests. In practice, this causes a small skew in our pre-training process. Note, however, that this does not affect the validity of using ETH Py150 Open as our fine-tuning corpus, or our results, because there is still no "information leak" between the pre-training and fine-tuning corpora.
+
+We are indebted to David Gros (@DNGros) for discovering this in our datasets, and bringing it to our attention.
+
+### Collection Query
+
+We have been asked about the query used to fetch the pre-training corpus from BigQuery's GitHub dataset. We provide it here:
+
+```
+with
+  allowed_repos as (
+    select repo_name, license from `bigquery-public-data.github_repos.licenses`
+    where license in unnest(
+      ["artistic-2.0", "isc", "mit", "cc0-1.0", "epl-1.0", "gpl-2.0",
+       "gpl-3.0", "mpl-2.0", "lgpl-2.1", "lgpl-3.0", "unlicense", "apache-2.0",
+       "bsd-2-clause"])),
+  github_files_at_head as (
+    select id, repo_name, path as filepath, symlink_target
+    from `bigquery-public-data.github_repos.files`
+    where ref = "refs/heads/master" and ends_with(path, ".py")
+    and symlink_target is null),
+  unique_full_path AS (
+    select id, max(concat(repo_name, ':', filepath)) AS full_path
+    from github_files_at_head
+    group by id),
+  unique_github_files_at_head AS (
+    select github_files_at_head.id, github_files_at_head.repo_name,
+      github_files_at_head.filepath
+    from github_files_at_head, unique_full_path
+    where concat(github_files_at_head.repo_name, ':',
+                 github_files_at_head.filepath) = unique_full_path.full_path),
+  github_provenances as (
+    select id, allowed_repos.repo_name as repo_name, license, filepath
+    from allowed_repos inner join unique_github_files_at_head
+    on allowed_repos.repo_name = unique_github_files_at_head.repo_name),
+  github_source_files as (
+    select id, content
+    from `bigquery-public-data.github_repos.contents`
+    where binary = false),
+  github_source_snapshot as (
+    select github_source_files.id as id, repo_name as repository, license,
+      filepath,content
+    from github_source_files inner join github_provenances
+    on github_source_files.id = github_provenances.id)
+select * from github_source_snapshot;
+```
+
+Note that this corrects for the error described in the previous subsection.
+
+The original query, used for the pre-training corpus in the paper, did not have
+the ID-based deduplication done by views `unique_full_path` and
+`unique_github_files_at_head`. Specifically, view `github_provenances` was
+reading from `github_files_at_head` in its `from` clause, rather than from
+`unique_github_files_at_head`.
+
+
+## Update 2020/11/16: Pre-trained Java Model with Code Comments
+
+We are releasing a Java pre-training corpus and pre-trained model. This model was pre-trained on all Java content, including comments.
+
+* Java, deduplicated, with code comments, BigQuery snapshot as of October 18, 13, 2020.
+    * Manifest: [[UI]](https://console.cloud.google.com/storage/browser/cubert/20201018_Java_Deduplicated/github_java_manifest)
+        [`gs://cubert/20201018_Java_Deduplicated/github_java_manifest`].
+    * Vocabulary: [[UI]](https://console.cloud.google.com/storage/browser/_details/cubert/20201018_Java_Deduplicated/github_java_vocabulary.txt)
+        [`gs://cubert/20201018_Java_Deduplicated/github_java_vocabulary.txt`].
+    * Model checkpoint for length 1024, 1 epoch: [[UI]](https://console.cloud.google.com/storage/browser/cubert/20201018_Java_Deduplicated/pre_trained_model_deduplicated__epochs_1__length_1024)
+        [`gs://cubert/20201018_Java_Deduplicated/pre_trained_model_deduplicated__epochs_1__length_1024`].
+
+
 ## Update 2020/09/29: Pre-trained Java Model
 
 We are releasing a Java pre-training corpus and pre-trained model. This model was not pre-trained on comments, but an expanded model including Javadoc and regular comments is upcoming.
@@ -16,7 +104,7 @@ We are releasing a Java pre-training corpus and pre-trained model. This model wa
 ## Introduction
 
 This is a repository for code, models and data accompanying the ICML 2020 paper
-[Learning and Evaluating Contextual Embedding of Source Code](https://proceedings.icml.cc/static/paper_files/icml/2020/5401-Paper.pdf). In addition to the Python artifacts described in the paper, we are also
+[Learning and Evaluating Contextual Embedding of Source Code](http://proceedings.mlr.press/v119/kanade20a.html). In addition to the Python artifacts described in the paper, we are also
 releasing the pre-training corpus and CuBERT models for other languages.
 
 If you use the code, models or data released through this repository, please
@@ -54,6 +142,21 @@ produce output similar to that illustrated in the
 `subtokenized_source_code.py.json` file. To obtain token-ID sequences for use
 with TensorFlow models, the `decode_list` logic from
 `code_to_subtokenized_sentences.py` can be skipped.
+
+It is possible to configure CuBERT tokenizers to skip emitting tokens of some
+kinds. For our fine-tuning tasks presented below, we skip comment and whitespace
+tokens. After initializing a tokenizer, this will configure it to skip
+those kinds of tokens:
+```
+from cubert import unified_tokenizer
+from cubert import python_tokenizer
+...
+tokenizer = python_tokenizer.PythonTokenizer()
+tokenizer.update_types_to_skip((
+      unified_tokenizer.TokenKind.COMMENT,
+      unified_tokenizer.TokenKind.WHITESPACE,
+  ))
+```
 
 ## The Multi-Headed Pointer Model
 
@@ -121,7 +224,7 @@ Here we describe the 6 Python benchmarks we created. All 6 benchmarks were deriv
 
 1. **Function-docstring classification**. Combinations of functions with their correct or incorrect documentation string, used to train a classifier that can tell which pairs go together. The JSON fields are:
      * `function`: string, the source code of a function as text
-     * `docstring`: string, the documentation string for that function
+     * `docstring`: string, the documentation string for that function. Note that the string is unquoted. To be able to properly tokenize it with the CuBERT tokenizers, you have to wrap it in quotes first. For example, in Python, use `string_to_tokenize = f'"""{docstring}"""'`.
      * `label`: string, one of (“Incorrect”, “Correct”), the label of the example.
      * `info`: string, an unformatted description of how the example was constructed, including the source dataset (always “ETHPy150Open”), the repository and filepath, the function name and, for “Incorrect” examples, the function whose docstring was substituted.
 1. **Exception classification**. Combinations of functions where one exception type has been masked, along with a label indicating the masked exception type. The JSON fields are:

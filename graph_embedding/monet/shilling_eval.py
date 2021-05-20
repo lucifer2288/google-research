@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 """Runs eval metrics for the shilling attack experiment in Section 4."""
 
+# pylint: disable=use-symbolic-message-instead
 # pylint: disable=missing-docstring
 # pylint: disable=redefined-outer-name
 # pylint: disable=dangerous-default-value

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ class VolatilityFormatter(GenericDataFormatter):
     index = df['year']
     train = df.loc[index < valid_boundary]
     valid = df.loc[(index >= valid_boundary) & (index < test_boundary)]
-    test = df.loc[index >= test_boundary]
+    test = df.loc[(index >= test_boundary) & (df.index <= '2019-06-28')]
 
     self.set_scalers(train)
 

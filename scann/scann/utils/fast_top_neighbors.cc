@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 #include "scann/utils/fast_top_neighbors.h"
 
+#include <cstdint>
+
 #include "absl/strings/str_cat.h"
 #include "scann/utils/bits.h"
 #include "scann/utils/intrinsics/avx2.h"
@@ -21,8 +23,7 @@
 #include "scann/utils/util_functions.h"
 #include "scann/utils/zip_sort.h"
 
-namespace tensorflow {
-namespace scann_ops {
+namespace research_scann {
 namespace {
 
 constexpr bool kShouldLog = false;
@@ -119,18 +120,14 @@ SCANN_INLINE DistT FastMedianOf3(DistT v0, DistT v1, DistT v2) {
 
 #ifdef __x86_64__
 
-#define SCANN_SIMD_INLINE SCANN_SIMD_ATTRIBUTE SCANN_INLINE
-#define SCANN_SIMD_INLINE_LAMBDA SCANN_SIMD_ATTRIBUTE SCANN_INLINE_LAMBDA
-#define SCANN_SIMD_OUTLINE SCANN_SIMD_ATTRIBUTE SCANN_OUTLINE
-
 namespace avx2 {
-#define SCANN_SIMD_ATTRIBUTE SCANN_AVX2_ATTRIBUTE
+#define SCANN_SIMD_ATTRIBUTE SCANN_AVX2
 #include "scann/utils/fast_top_neighbors_impl.inc"
 #undef SCANN_SIMD_ATTRIBUTE
 }  // namespace avx2
 
 namespace sse4 {
-#define SCANN_SIMD_ATTRIBUTE SCANN_SSE4_ATTRIBUTE
+#define SCANN_SIMD_ATTRIBUTE SCANN_SSE4
 #include "scann/utils/fast_top_neighbors_impl.inc"
 #undef SCANN_SIMD_ATTRIBUTE
 }  // namespace sse4
@@ -158,15 +155,6 @@ size_t FastTopNeighbors<DistT, DatapointIndexT>::ApproxNthElement(
   dd[keep_min] = dd[keep_min - 1];
   ii[keep_min] = ii[keep_min - 1];
   return keep_min;
-}
-
-template <typename DistT, typename DatapointIndexT>
-void FastTopNeighbors<DistT, DatapointIndexT>::Mutator::PushDistanceBlock(
-    ConstSpan<DistT> distance_block, DatapointIndexT base_dp_idx) {
-  PushDistanceBlockTopFastTopNeighbors<
-      DistT, DatapointIndexT,
-      FastTopNeighbors<DistT, DatapointIndexT>::Mutator>(distance_block,
-                                                         base_dp_idx, this);
 }
 
 template <typename DistT, typename DatapointIndexT>
@@ -238,5 +226,4 @@ template class FastTopNeighbors<int16_t, uint64_t>;
 template class FastTopNeighbors<float, uint64_t>;
 template class FastTopNeighbors<float, absl::uint128>;
 
-}  // namespace scann_ops
-}  // namespace tensorflow
+}  // namespace research_scann

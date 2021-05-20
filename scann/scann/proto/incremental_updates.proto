@@ -1,4 +1,4 @@
-// Copyright 2020 The Google Research Authors.
+// Copyright 2021 The Google Research Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 syntax = "proto2";
 
-package tensorflow.scann_ops;
+package research_scann;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -42,6 +42,10 @@ message IncrementalUpdateConfig {
     optional bool publish_rpc_updates = 5 [default = true];
 
     optional string filter = 6;
+
+    optional bool use_mod_term_filter = 7 [default = false];
+
+    optional string mod_term_filter_signature = 8 [default = "fprint"];
   }
 
   oneof DurabilityReplication {
@@ -51,6 +55,9 @@ message IncrementalUpdateConfig {
   optional string sharder = 6 [default = ""];
 
   optional google.protobuf.Duration startup_catchup_threshold = 7;
+
+  optional uint32 num_updates_between_garbage_collections = 8
+      [default = 100000];
 }
 
 message IncrementalUpdateMetadata {

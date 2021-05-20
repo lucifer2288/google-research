@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1202,7 +1202,7 @@ def main(_):
       f.write(float_model)
 
     if FLAGS.use_post_quantization:
-      converter.optimizations = [tf.lite.Optimize.OPTIMIZE_FOR_LATENCY]
+      converter.optimizations = [tf.lite.Optimize.DEFAULT]
       converter.experimental_new_quantizer = True
 
     tflite_model = converter.convert()

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2020 The Google Research Authors.
+# Copyright 2021 The Google Research Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ KEY_PREPROCESSED_KEYPOINT_MASKS_2D = 'preprocessed_keypoint_masks_2d'
 KEY_OFFSET_POINTS_2D = 'offset_points_2d'
 KEY_SCALE_DISTANCES_2D = 'scale_distances_2d'
 KEY_KEYPOINTS_3D = 'keypoints_3d'
+KEY_PREPROCESSED_KEYPOINTS_3D = 'preprocessed_keypoints_3d'
 KEY_OFFSET_POINTS_3D = 'offset_points_3d'
 KEY_SCALE_DISTANCES_3D = 'scale_distances_3d'
 KEY_EMBEDDING_MEANS = 'unnormalized_embeddings'
@@ -61,13 +62,26 @@ SUPPORTED_INFERENCE_MODEL_INPUT_KEYPOINT_TYPES = [
     MODEL_INPUT_KEYPOINT_TYPE_2D_INPUT,
 ]
 
+# Base model types.
+# Simple Baseline architecutre: Martinez, et al. A simple yet effective baseline
+# for 3d human pose estimation. ICCV 2017.
+BASE_MODEL_TYPE_SIMPLE = 'SIMPLE'
+# Supported base model types.
+SUPPORTED_BASE_MODEL_TYPES = [BASE_MODEL_TYPE_SIMPLE]
+
 # Embedding types.
 # Point embedding.
 EMBEDDING_TYPE_POINT = 'POINT'
-# Gaussian embedding.
+# Gaussian embedding with diagonal covariance matrix.
 EMBEDDING_TYPE_GAUSSIAN = 'GAUSSIAN'
+# Gaussian embedding with scalar variance.
+EMBEDDING_TYPE_GAUSSIAN_SCALAR_VAR = 'GAUSSIAN_SCALAR_VAR'
 # Supported embedding types.
-SUPPORTED_EMBEDDING_TYPES = [EMBEDDING_TYPE_POINT, EMBEDDING_TYPE_GAUSSIAN]
+SUPPORTED_EMBEDDING_TYPES = [
+    EMBEDDING_TYPE_POINT,
+    EMBEDDING_TYPE_GAUSSIAN,
+    EMBEDDING_TYPE_GAUSSIAN_SCALAR_VAR,
+]
 
 # Embedding distance types.
 # Distance computed using embedding centers.
@@ -100,12 +114,16 @@ SUPPORTED_DISTANCE_PAIR_TYPES = [
 DISTANCE_KERNEL_SQUARED_L2 = 'SQUARED_L2'
 # L2-based sigmoid matching probability.
 DISTANCE_KERNEL_L2_SIGMOID_MATCHING_PROB = 'L2_SIGMOID_MATCHING_PROB'
+# Squared L2-based sigmoid matching probability.
+DISTANCE_KERNEL_SQUARED_L2_SIGMOID_MATCHING_PROB = (
+    'SQUARED_L2_SIGMOID_MATCHING_PROB')
 # Expected likelihood.
 DISTANCE_KERNEL_EXPECTED_LIKELIHOOD = 'EXPECTED_LIKELIHOOD'
 # Supported distance kernels.
 SUPPORTED_DISTANCE_KERNELS = [
     DISTANCE_KERNEL_SQUARED_L2,
     DISTANCE_KERNEL_L2_SIGMOID_MATCHING_PROB,
+    DISTANCE_KERNEL_SQUARED_L2_SIGMOID_MATCHING_PROB,
     DISTANCE_KERNEL_EXPECTED_LIKELIHOOD,
 ]
 
